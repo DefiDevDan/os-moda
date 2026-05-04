@@ -1,21 +1,38 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-04-29 · API version: **1.2.1**
+Last updated: 2026-05-04 · API version: **1.2.3**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
+
+**v1.2.3 (2026-05-04) — Swarms retired:**
+- Removed the `Swarms (alpha)` family (`/api/v1/swarms/*`, 16 paths + 2 WS feeds). The same outcome — coordinated autonomous AI businesses — is now delivered by spawning a server, opening the chat WebSocket, and prompting the agent: every spawn ships with full system access plus the **Factories** (spec-kit) surface. The fictional Venture-orchestrator simulator is gone; ~2300 LOC retired.
+- No impact on stable v1 endpoints (`/plans`, `/spawn/:planId`, `/status/:orderId`, `/tokens/:token_id`, `/spec-kit/projects`, `/chat/{orderId}`, `/docs`, `/.well-known/agent-card.json`).
+
+**v1.2.2 (2026-04-30) — spec-driven development + auth-type gating:**
+- New free endpoint `GET /api/v1/spec-kit/projects` (Bearer) — discover spec-driven projects across the caller's spawned servers. Aggregated from heartbeat data; no SSH required.
+- Every spawn now ships with `github/spec-kit` baked in (uv + specify-cli, pinned `v0.8.4`). The agent gets two new MCP tools (`spec_kit_init` + `spec_kit_run`) that scaffold spec-kit projects on demand. Bumped to **92 MCP tools / 20 system skills**.
+- Agent Card gained capability flags: `spec_driven_development`, `spec_kit_version`, plus pre-existing `install_failure_visibility`, `install_watchdog_minutes`, `provision_progress_callbacks`, `network_mode`.
+- Agent Card `runtimes[].supported_auth_types` — `claude-code` accepts both `oauth` + `api_key`; `openclaw` accepts `api_key` only. The dashboard Engine tab and SDK both enforce this contract client-side; the customer-server gateway enforces server-side.
+- `claude-opus-4-7` is now a default model for the `claude-code` runtime (newest Anthropic Opus). Selectable from the dashboard Engine tab and via the spawn `default_model` field.
+- The "(legacy)" suffix on OpenClaw was removed everywhere — it's a first-class engine for BYOK / non-Anthropic providers.
 
 **v1.2.1 (2026-04-29) — install-failure visibility pass:**
 - New order statuses: `install_failed` (watchdog or explicit callback) and `deleted`.
 - New `install_error` field on full status response when `status=install_failed`. Carries `step`, `reason`, optional `log_tail` (200 lines), `at`, and `watchdog` boolean.
 - New `provision_steps[]` field surfaces every install phase transition.
 - Server-side callbacks `/api/heartbeat`, `/api/provision-progress`, `/api/provision-failed` documented in OpenAPI for self-hosted operators (NOT for API integrators — the spawned server posts these to its own callback URL).
-- Swarms (alpha) family at `/api/v1/swarms/*` — autonomous Venture orchestrator. Documented but explicitly **outside** the stable v1 contract.
 
 **v1.2.0 (2026-04-18):** modular runtime — `runtime`, `default_model`, `credentials[]` fields on spawn requests; per-server dashboard config endpoints.
 
 **v1.1.0 (2026-04-17) — production readiness:** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec.
 
-**Live, interactive reference**: <https://spawn.os.moda/docs> (Swagger UI bound to `/api/v1/docs` — auto-current with the deployed server).
+**Live, interactive reference**: <https://spawn.os.moda/docs> (Swagger UI bound to `/api/v1/docs` — auto-current with the deployed server). The spec ships concrete `example` values on every schema and multi-case `examples` on the most-polled operations (status, spec-kit projects, agent-card).
+
+**What v1 does NOT expose** — call out for integrators planning their dashboards:
+- **Server termination via Bearer** — currently dashboard-only at `/api/dashboard/servers/:id` (cookie auth). Integrators should retire the token (`DELETE /api/v1/tokens/{id}`) and ask end-users to delete via the dashboard.
+- **Post-spawn agent/credential config via Bearer** — the `/config/*` proxy endpoints are cookie-authed (SSH-tunnelled). Pre-seed `credentials[]` + `runtime` + `default_model` at spawn time instead.
+- **Webhooks** — poll `GET /api/v1/status/{orderId}`. Drive sub-status progress UIs from the `provision_steps[]` field.
+- **Listing all servers a token owns** — tokens are scoped to a single order. Hold the `order_id` returned by spawn alongside the token.
 
 ---
 
@@ -156,23 +173,89 @@ Check server provisioning status.
 }
 ```
 
-**With `Authorization: Bearer osk_<token>`** — full details:
+**With `Authorization: Bearer osk_<token>`** — full details. Three concrete cases (live in `/docs` as named examples):
+
+*Running:*
 ```json
 {
-  "order_id": "uuid",
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "running",
-  "plan": "Solo",
-  "created_at": "2026-03-06T12:00:00.000Z",
+  "plan": "Pro",
+  "created_at": "2026-05-04T08:00:00.000Z",
   "server_ip": "1.2.3.4",
-  "server_name": "osmoda-a1b2c3d4",
+  "server_name": "osmoda-9cbfc612",
   "region": "eu-central",
   "ssh": "ssh root@1.2.3.4",
-  "chat_url": "wss://spawn.os.moda/api/v1/chat/uuid",
-  "price_usd": 14.99
+  "chat_url": "wss://spawn.os.moda/api/v1/chat/550e8400-e29b-41d4-a716-446655440000",
+  "price_usd": 34.99,
+  "setup_complete": true,
+  "last_heartbeat": "2026-05-04T08:14:00.000Z",
+  "provision_steps": [
+    { "step": "preflight",    "status": "done", "detail": "ubuntu 24.04",            "ts": "2026-05-04T08:00:30.000Z" },
+    { "step": "dependencies", "status": "done", "detail": "rustc + node ready",      "ts": "2026-05-04T08:01:50.000Z" },
+    { "step": "build",        "status": "done", "detail": "cargo build in 5m39s",    "ts": "2026-05-04T08:07:31.000Z" },
+    { "step": "services",     "status": "done", "detail": "13 osmoda-* units active","ts": "2026-05-04T08:08:14.000Z" },
+    { "step": "ready",        "status": "done", "detail": "first heartbeat received","ts": "2026-05-04T08:08:43.000Z" }
+  ]
 }
 ```
 
-**Status values**: `pending` → `provisioning` → `running` | `failed`
+*Install failed (with diagnostic `install_error`):*
+```json
+{
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "install_failed",
+  "plan": "Pro",
+  "created_at": "2026-05-04T08:00:00.000Z",
+  "setup_complete": false,
+  "install_failed_at": "2026-05-04T08:14:22.000Z",
+  "install_error": {
+    "step": "build",
+    "reason": "Install exited with code 137 at phase build (OOM)",
+    "log_tail": "+ cargo build --release\n[ … 198 more lines … ]\nKilled\n",
+    "at": "2026-05-04T08:14:22.000Z",
+    "watchdog": false
+  },
+  "provision_steps": [
+    { "step": "preflight",    "status": "done",    "ts": "2026-05-04T08:00:30.000Z" },
+    { "step": "build",        "status": "started", "ts": "2026-05-04T08:02:10.000Z" },
+    { "step": "failed",       "status": "error",   "detail": "Install exited with code 137", "ts": "2026-05-04T08:14:22.000Z" }
+  ]
+}
+```
+
+**Status values**: `pending` → `provisioning` → `running` | `failed` | `install_failed` | `deleted`. See the [order-status table](#order-status-enum) below for which side sets each.
+
+#### `GET /api/v1/spec-kit/projects` *(v1.2.2)*
+
+List spec-driven projects across the caller's spawned servers. **Bearer required** (`osk_<hex>`). Aggregated from each server's most recent heartbeat — no SSH required.
+
+```bash
+curl -H "Authorization: Bearer osk_…" \
+  https://spawn.os.moda/api/v1/spec-kit/projects
+```
+
+**Response:**
+```json
+{
+  "count": 2,
+  "projects": [
+    {
+      "order_id": "550e8400-e29b-41d4-a716-446655440000",
+      "server_name": "osmoda-9cbfc612",
+      "project": "billing-api",
+      "slug": "billing-api",
+      "status": "implementing",
+      "last_implement_at": "2026-05-04T08:11:42.000Z",
+      "spec_path": "/workspace/billing-api/specs/001-billing-api/spec.md"
+    }
+  ]
+}
+```
+
+Each project corresponds to a `specify init`-scaffolded directory under `/workspace/<slug>/` on the customer server. Use the [WebSocket chat](#ws-apiv1chatorderidtokenosk_token) with `/speckit-plan`, `/speckit-tasks`, or `/speckit-implement` to advance one. Projects in this list are agent-managed via the `spec_kit_init` + `spec_kit_run` MCP tools.
+
+**Auth note**: tokens are per-order, so this endpoint returns projects for the single server that issued the calling token. To aggregate across many servers under a SaaS umbrella, run one call per token from your own backend.
 
 #### `GET /api/v1/docs`
 
@@ -209,8 +292,12 @@ All spawn endpoints require x402 USDC payment. Without a valid `PAYMENT` header,
 {
   "region": "eu-central",
   "ssh_key": "ssh-ed25519 AAAA...",
-  "ai_provider": "anthropic",
-  "api_key": "sk-ant-..."
+  "runtime": "claude-code",
+  "default_model": "claude-opus-4-7",
+  "credentials": [
+    { "label": "My Claude Pro", "provider": "anthropic", "type": "oauth",    "secret": "sk-ant-oat01-…" },
+    { "label": "Fallback key",  "provider": "anthropic", "type": "api_key",  "secret": "sk-ant-api03-…" }
+  ]
 }
 ```
 
@@ -218,8 +305,13 @@ All spawn endpoints require x402 USDC payment. Without a valid `PAYMENT` header,
 |-------|------|---------|-------------|
 | `region` | string | `eu-central` | Server location: `eu-central`, `eu-north`, `us-east`, `us-west` |
 | `ssh_key` | string | null | SSH public key (ed25519/RSA/ECDSA). Added to `authorized_keys` |
-| `ai_provider` | string | null | `anthropic` or `openai` — AI provider for the server's agent |
-| `api_key` | string | null | API key for the provider. Passed via cloud-init, never persisted |
+| `runtime` | string | `claude-code` | Agent runtime engine: `claude-code` or `openclaw`. `claude-code` accepts OAuth + API key; `openclaw` accepts API key only. |
+| `default_model` | string | `claude-opus-4-7` (claude-code) / `claude-sonnet-4-6` (openclaw) | Initial default model. Per-agent overrides via the dashboard Engine tab or `/config/agents`. |
+| `credentials` | array | `[]` | Up to 8 entries pre-seeded into the server's encrypted credential store (AES-256-GCM). Each: `{label, provider: "anthropic"\|"openai", type: "oauth"\|"api_key", secret}`. OAuth credentials only bind to `claude-code` agents. |
+| `ai_provider` | string | null | **Legacy.** `anthropic` or `openai`. Auto-migrated into a single `credentials[]` entry. New integrations should use `credentials[]` directly. |
+| `api_key` | string | null | **Legacy.** API key for `ai_provider`. Same auto-migration. |
+
+**Idempotency**: send `Idempotency-Key: <16-128 chars>` to make spawn safe to retry. Cached for 24 h. See the [Idempotency](#idempotency) section.
 
 **Response** (after x402 payment verified):
 ```json
@@ -331,14 +423,6 @@ These three endpoints are called BY the spawned server (`install.sh` / `agentd` 
 **Watchdog**: an internal cron on spawn flags any order where `status=running, no heartbeat ever, age > 25 min` as `install_failed` with `install_error.watchdog=true, step=no_callback`. This ensures customers never sit in eternal "Installing..." even if both `install.sh` callbacks fail.
 
 Full schemas in the [OpenAPI spec](https://spawn.os.moda/api/v1/docs).
-
----
-
-## Swarms (alpha) — autonomous Venture orchestrator
-
-The `/api/v1/swarms/*` family is **alpha** and explicitly **outside the v1 contract**. It powers the `/swarms` dashboard page (autonomous lead-gen factory). May change in any release. Listed in OpenAPI for discovery; do not depend on stability.
-
-If you want stability, build against the 6 v1 endpoints documented above (`/plans`, `/spawn/:planId`, `/status/:orderId`, `/tokens/:token_id`, `/docs`, `/.well-known/agent-card.json`) plus the WebSocket chat. Those carry the v1.x contract guarantee.
 
 ---
 
@@ -574,12 +658,44 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
 ```json
 {
   "name": "osModa Spawn",
-  "description": "Spawn dedicated AI-managed NixOS servers...",
+  "description": "Spawn dedicated AI-managed servers...",
   "url": "https://spawn.os.moda",
-  "version": "1.1.0",
+  "version": "1.2.3",
   "protocols": ["A2A/1.0", "ERC-8004"],
   "protocol": "A2A",
-  "capabilities": { "x402": true, "streaming": true, "websocket": true },
+  "capabilities": {
+    "x402": true,
+    "streaming": true,
+    "websocket": true,
+    "modular_runtime": true,
+    "oauth_credentials": true,
+    "idempotency": true,
+    "token_lifecycle": true,
+    "structured_errors": true,
+    "install_failure_visibility": true,
+    "install_watchdog_minutes": 25,
+    "provision_progress_callbacks": true,
+    "spec_driven_development": true,
+    "spec_kit_version": "v0.8.4",
+    "network_mode": "testnet"
+  },
+  "runtimes": [
+    {
+      "name": "claude-code",
+      "display_name": "Claude Code",
+      "recommended": true,
+      "supported_auth_types": ["oauth", "api_key"],
+      "default_models": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
+      "description": "Anthropic's official Claude CLI. Accepts OAuth (Claude Pro / Max) + API key."
+    },
+    {
+      "name": "openclaw",
+      "display_name": "OpenClaw",
+      "supported_auth_types": ["api_key"],
+      "default_models": ["claude-sonnet-4-6"],
+      "description": "OpenClaw multi-runtime CLI (BYOK). API key only — does not accept OAuth."
+    }
+  ],
   "skills": [
     {
       "id": "spawn-test",
@@ -596,7 +712,7 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
           { "network": "solana:5eyk…", "chainId": "mainnet-beta", "asset": "EPjF…",                                      "payTo": "DFbW..." }
         ]
       },
-      "inputSchema": { "..." },
+      "inputSchema": { "...includes runtime / default_model / credentials..." },
       "outputSchema": { "..." }
     }
   ],
@@ -608,14 +724,17 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
     ]
   },
   "endpoints": {
-    "plans":  "https://spawn.os.moda/api/v1/plans",
-    "docs":   "https://spawn.os.moda/api/v1/docs",
-    "status": "https://spawn.os.moda/api/v1/status/{orderId}",
-    "tokens": "https://spawn.os.moda/api/v1/tokens/{token_id}",
-    "chat":   "wss://spawn.os.moda/api/v1/chat/{orderId}"
+    "plans":             "https://spawn.os.moda/api/v1/plans",
+    "docs":              "https://spawn.os.moda/api/v1/docs",
+    "status":            "https://spawn.os.moda/api/v1/status/{orderId}",
+    "tokens":            "https://spawn.os.moda/api/v1/tokens/{token_id}",
+    "chat":              "wss://spawn.os.moda/api/v1/chat/{orderId}",
+    "spec_kit_projects": "https://spawn.os.moda/api/v1/spec-kit/projects"
   }
 }
 ```
+
+**`runtimes[].supported_auth_types`** is the source of truth for credential compatibility. An OAuth credential bound to an `openclaw` agent is rejected at the customer-server gateway with a structured error; the dashboard Engine tab and the `@osmoda/client` SDK both perform the same check client-side for early feedback.
 
 ---
 

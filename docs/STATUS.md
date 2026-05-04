@@ -2,7 +2,15 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-04-30
+Last updated: 2026-05-04
+
+## Recent operational changes (2026-05-04)
+
+| Area | Change | Why |
+|---|---|---|
+| Engine UX | Removed `(legacy)` from OpenClaw labels everywhere; added OpenClaw OAuth gating (cannot bind OAuth credentials to OpenClaw agents); polished credential add form with prefix validation + live help; added Claude Opus 4.7 as a model option in Engine tab + Settings; SDK exposes `isAuthTypeCompatible()` + master-list fallback for newly-released models | Production-quality engine surface for end-users who configure agents without SSH. |
+| Swarms | **Retired the entire Swarms (alpha) family** — 16 OpenAPI paths, 2 WS feeds, `apps/spawn/lib/swarms/` (829 LOC), `apps/spawn/public/swarms{,-venture-demo}.html`, `packages/osmoda-venture-bridge/`, all related schemas/tags/examples | Was a simulator pretending to be product (`SWARMS_REAL=1` real-mode never wired up). 0 swarms / 0 ventures live across 10 days. The same outcome — autonomous AI businesses — is delivered by spawning a server, opening WS chat, and prompting the agent. **Factories** (spec-kit) is the production surface. |
+| API docs | OpenAPI bumped to **v1.2.3**; integrator quick-start in spec description; examples on every schema + multi-case examples on `/status`, `/spec-kit/projects`, agent card; new `Chat (WebSocket)` tag + virtual `/api/v1/chat/{orderId}` path so Swagger UI surfaces the WS protocol; CORS / rate-limit / idempotency / request-ID rules in spec description; "What v1 does NOT expose" callout for integrators; SDK README rewritten | Make `/api/v1/docs` self-sufficient for a third-party dashboard integrator. |
 
 ## Recent operational changes (2026-04-30)
 
@@ -45,7 +53,7 @@ Last updated: 2026-04-30
 | Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
-| Spawn API version | 1.2.0 |
+| Spawn API version | 1.2.3 |
 | osmoda-gateway version | 0.2.0 |
 
 ---
@@ -394,6 +402,11 @@ Redesigned single-column layout with tabbed interface (Overview / Chat / Setting
 ### v1 Programmatic API
 
 Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
+**v1.2.3** (2026-05-04): retired the Swarms (alpha) family (16 paths + 2 WS feeds + venture-bridge package);
+spec/SDK/CHANGELOG synced. **v1.2.2** (2026-04-30): spec-kit baked into every spawn;
+`GET /api/v1/spec-kit/projects`; agent-card capability flags + `runtimes[].supported_auth_types`;
+claude-opus-4-7 as default Anthropic Opus. **v1.2.1** (2026-04-29): install-failure visibility
+(`install_failed` status, `install_error` field, `provision_steps[]`, server-side callbacks).
 **v1.2.0** (2026-04-18): modular runtime + per-server credentials/agents management —
 see `apps/spawn/CHANGELOG.md`. **v1.1.0** (2026-04-17): idempotency, structured errors,
 token lifecycle, WS hardening.
@@ -406,14 +419,15 @@ token lifecycle, WS hardening.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| Agent Card (`/.well-known/agent-card.json`) | **Solid** | A2A + ERC-8004 (protocols array, chainId per payment method, semver 1.1.0) |
+| Agent Card (`/.well-known/agent-card.json`) | **Solid** | A2A + ERC-8004 — protocols array, chainId per payment method, semver **1.2.3**, `runtimes[].supported_auth_types`, capability flags incl. `spec_driven_development`, `install_failure_visibility`, `network_mode` |
 | `GET /api/v1/plans` | **Solid** | Plan list with x402 pricing, regions, network mode |
 | `POST /api/v1/spawn/:planId` | **Solid** | x402-gated spawn. **Idempotency-Key** pre-check runs BEFORE x402 middleware → retries never re-pay |
 | `GET /api/v1/status/:orderId` | **Solid** | Basic status free; full details require Bearer `osk_`; enforces token expiry/revoke |
 | `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
 | `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
 | `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
-| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 v1.1.0 — `securitySchemes.bearerAuth`, `Error` schema, `required` arrays, examples, `x-websocket` |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.3** — 14 paths, 18 schemas, every schema has `example`, `/status` ships 3 named examples, `bearerAuth`, virtual `/api/v1/chat/{orderId}` path so Swagger UI surfaces the WS protocol, `x-websocket` extension with full frame protocol, integrator quick-start in description. `redocly lint` 0 errors. |
+| `GET /api/v1/spec-kit/projects` | **Functional** | Bearer-required. Aggregates spec-driven projects from heartbeat. Powers the per-server **Factories** dashboard tab. |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | Structured error envelope | **Solid** | `{code, message, detail?, request_id, error}` on every /api/v1/* + agent-card error; legacy `error` kept one release |
 | Request IDs | **Solid** | `X-Request-Id: req_<ulid>` on every response, prefixed into `[req_…]` log lines |

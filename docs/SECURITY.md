@@ -129,6 +129,19 @@ Five phases, all live on spawn.os.moda:
 - **Hot-reloadable agents.json.** SIGHUP reloads; in-flight sessions keep their original driver + credential snapshot; new sessions see the new config. Zero WebSocket drops.
 - **Per-server dashboard UI.** Engine tab with Credentials, Agents, Available engines sections. No SSH, no rebuild. Save triggers SIGHUP on the customer gateway.
 
+### Auth-type gating + Engine UX hardening (v1.2.3, shipped May 4)
+
+- **`runtimes[].supported_auth_types` on the agent card** — `claude-code` accepts `["oauth", "api_key"]`; `openclaw` accepts `["api_key"]` only. Source of truth for credential / runtime compatibility.
+- **OAuth → OpenClaw is rejected at three layers**: customer-server gateway (server-side, authoritative), dashboard `engineAgentSave` (client-side fail-fast), SDK `isAuthTypeCompatible()` helper. A misbinding can't make it through any of them.
+- **Credential add UI**: prefix validation (`sk-ant-oat01-…` for OAuth, `sk-ant-api03-…` for API key) before POST; auto-clear of incompatible credentials when runtime changes; collapsed-by-default form to reduce mistake surface.
+- **`(legacy)` removed from OpenClaw labels** — eliminates the implicit "switch away from this" suggestion that was leading users to misunderstand which engine was deprecated (neither is).
+
+### Swarms retirement (v1.2.3, shipped May 4)
+
+- Removed the entire `Swarms (alpha)` family — 16 paths, 2 unauthenticated WS feeds, simulator + JSON store + frontend.
+- The two WS feeds (`/api/v1/swarms/{id}/live`, `/api/v1/swarms/live`) had `auth: { type: "none" }` with a TODO to gate them; that exposure is now closed by deletion.
+- The deleted `osmoda-venture-bridge` package was an MCP server posting unauthenticated venture events to spawn over the public internet; that channel is gone too.
+
 ### Post-audit hardening (b8bded0)
 
 An independent audit after v1.2 flagged eight items; three were false positives (assuming multi-tenant when osModa is single-tenant) and six were genuine:

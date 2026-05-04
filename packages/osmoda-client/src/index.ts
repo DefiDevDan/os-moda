@@ -57,13 +57,22 @@ export interface SpawnCredentialInput {
   secret: string;
 }
 
+/** Order status values. v1.2.1 added `install_failed` + `deleted`. */
+export type OrderStatus =
+  | "pending"
+  | "provisioning"
+  | "running"
+  | "failed"
+  | "install_failed"
+  | "deleted";
+
 export interface SpawnResponse {
   order_id: string;
   api_token: string;
   plan: string;
   price_usd: number;
   server_ip: string | null;
-  status: "pending" | "provisioning" | "running" | "failed";
+  status: OrderStatus;
   status_url: string;
   chat_url: string;
   ssh: string | null;
@@ -72,9 +81,46 @@ export interface SpawnResponse {
 
 export interface StatusResponseBasic {
   order_id: string;
-  status: string;
+  status: OrderStatus;
   plan: string;
   created_at: string;
+}
+
+/** v1.2.1 — populated on full status when status=install_failed. */
+export interface InstallError {
+  step: string;
+  reason: string;
+  /** Last 200 lines of /var/log/osmoda-cloud-init.log. Only present when the
+   *  explicit /api/provision-failed callback fired (not on watchdog flips). */
+  log_tail?: string;
+  at: string;
+  /** true = watchdog cron flagged the order at the 25-min mark; false =
+   *  install.sh's EXIT trap explicitly posted the failure. */
+  watchdog: boolean;
+}
+
+/** v1.2.1 — one entry per install phase transition, in order. */
+export interface ProvisionStep {
+  step: string;
+  status: "started" | "done" | "error";
+  detail?: string;
+  ts: string;
+}
+
+/** v1.2.2 — a single spec-kit project on a spawned server. */
+export interface SpecKitProject {
+  order_id: string;
+  server_name: string | null;
+  project: string;
+  slug: string;
+  status: string;
+  last_implement_at: string | null;
+  spec_path: string;
+}
+
+export interface SpecKitProjectsResponse {
+  count: number;
+  projects: SpecKitProject[];
 }
 
 export interface StatusResponseFull extends StatusResponseBasic {
@@ -84,6 +130,16 @@ export interface StatusResponseFull extends StatusResponseBasic {
   ssh: string | null;
   chat_url: string;
   price_usd: number;
+  /** True after the spawned server's first heartbeat. Until then mid-install. */
+  setup_complete?: boolean;
+  /** ISO timestamp of the most recent heartbeat (null if never received). */
+  last_heartbeat?: string | null;
+  /** v1.2.1: install phase log. Empty array on legacy orders. */
+  provision_steps?: ProvisionStep[];
+  /** v1.2.1: set when status flipped to install_failed. */
+  install_failed_at?: string | null;
+  /** v1.2.1: only present when status === "install_failed". */
+  install_error?: InstallError;
 }
 
 export interface TokenMeta {
@@ -242,8 +298,10 @@ export class OsmodaClient {
   }
 
   /**
-   * Poll status until `status === "running"` or `"failed"`. Throws on
-   * failed. Polls every 15 s by default, up to 30 min.
+   * Poll status until `status === "running"` or a terminal failure
+   * (`"failed"` / `"install_failed"`). Throws on failure with the relevant
+   * error code and surfaces `install_error` in the thrown error's `detail`
+   * when available. Polls every 15 s by default, up to 30 min.
    */
   async waitForRunning(
     orderId: string,
@@ -254,12 +312,17 @@ export class OsmodaClient {
     for (;;) {
       const s = await this.statusFull(orderId);
       if (s.status === "running") return s;
-      if (s.status === "failed") {
+      if (s.status === "failed" || s.status === "install_failed") {
         throw new OsmodaApiError(
           500,
           {
-            code: "provisioning_failed",
-            message: `Order ${orderId} failed to provision.`,
+            code: s.status === "install_failed" ? "install_failed" : "provisioning_failed",
+            message:
+              s.install_error?.reason ??
+              `Order ${orderId} failed to provision (status=${s.status}).`,
+            detail: s.install_error
+              ? (s.install_error as unknown as Record<string, unknown>)
+              : undefined,
             request_id: "",
           },
           null,
@@ -286,6 +349,42 @@ export class OsmodaClient {
       expect204: true,
     });
   }
+
+  // ── Spec-kit (v1.2.2) ────────────────────────────────────────────────
+
+  /**
+   * List spec-driven projects across the caller's spawned server (token is
+   * per-order, so this returns projects for one server). Bearer required.
+   */
+  specKitProjects(): Promise<SpecKitProjectsResponse> {
+    if (!this.bearer) throw new Error("specKitProjects requires bearer osk_ token");
+    return this.request<SpecKitProjectsResponse>("/api/v1/spec-kit/projects", {
+      method: "GET",
+    });
+  }
+}
+
+// ── Auth-type compatibility helper (v1.2.2) ────────────────────────────
+
+/**
+ * Validate a credential `type` against a runtime per the agent-card's
+ * `runtimes[].supported_auth_types`. Returns null on compatible, or a
+ * human-readable reason string on mismatch. Use before binding a credential
+ * to an agent so the customer-server gateway doesn't have to reject it.
+ */
+export function isAuthTypeCompatible(
+  runtime: "claude-code" | "openclaw" | string,
+  authType: "oauth" | "api_key" | string,
+): string | null {
+  const SUPPORT: Record<string, ReadonlyArray<string>> = {
+    "claude-code": ["oauth", "api_key"],
+    "openclaw":    ["api_key"],
+  };
+  const accepted = SUPPORT[runtime];
+  if (!accepted) return null; // unknown runtime — let the server decide
+  if (accepted.includes(authType)) return null;
+  return `Runtime "${runtime}" does not accept "${authType}" credentials. ` +
+    `Supported: ${accepted.join(", ")}.`;
 }
 
 // ── Convenience: tokenIdFromToken ──────────────────────────────────────────

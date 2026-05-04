@@ -1,10 +1,14 @@
 # osModa — Feature Roadmap
 
-Last updated: 2026-04-18
+Last updated: 2026-05-04
 
 Current state: 10 Rust crates (9 daemons + 1 CLI), **92 MCP tools**, 20 skills, **modular
-runtime** (claude-code + openclaw drivers, v0.2 of the gateway), Spawn API **v1.2.0** with
-idempotency + structured errors + encrypted credential store + per-server dashboard config.
+runtime** (claude-code + openclaw drivers, v0.2 of the gateway), Spawn API **v1.2.3** with
+idempotency, structured errors, encrypted credential store, per-server dashboard config,
+spec-kit project discovery, and `runtimes[].supported_auth_types` (OAuth gating).
+Swarms (alpha) was retired in v1.2.3 — the same outcome (autonomous AI businesses) is
+delivered by spawning a server and prompting the agent. Every spawn ships with full system
+access plus the **Factories** (spec-kit) surface.
 
 This document covers what shipped and what's next, in priority order. See [SECURITY.md](SECURITY.md)
 for the trust model and [STATUS.md](STATUS.md) for detailed per-component maturity.
@@ -32,7 +36,7 @@ for the trust model and [STATUS.md](STATUS.md) for detailed per-component maturi
 | App process management (deploy, manage, resource-limit) | MCP bridge + systemd-run | **Functional** |
 | Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |
 | Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd (optional) | **Solid** |
-| Public spawn API v1.2.0 — idempotency, structured errors, token lifecycle | spawn.os.moda v1 API | **Solid** |
+| Public spawn API **v1.2.3** — idempotency, structured errors, token lifecycle, spec-kit discovery, OAuth/auth-type gating | spawn.os.moda v1 API | **Solid** |
 | Spawn-time runtime + credentials — `POST /api/v1/spawn/:planId` `{runtime, credentials[]}` | spawn.os.moda + install.sh | **Functional** (v1.2) |
 | A2A agent discovery (ERC-8004 Agent Card, protocols array, chainId) | spawn.os.moda `/.well-known/` | **Functional** |
 | First-party TypeScript SDK `@osmoda/client` | packages/osmoda-client | **Functional** |

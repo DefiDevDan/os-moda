@@ -578,7 +578,8 @@ DELETE /api/v1/tokens/:token_id       → Revoke token (Bearer, own-token only)
 WS     /api/v1/chat/:orderId          → WebSocket chat (auth via ?token=osk_)
                                         30s heartbeat, 10m idle close (4003),
                                         max 3 sessions/token, backpressure pause/resume
-GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.1.0, full schemas + examples)
+GET    /api/v1/spec-kit/projects      → Spec-driven project discovery (Bearer)
+GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.3, full schemas + examples)
 ```
 
 Every response carries `X-Request-Id`. Errors use a uniform envelope:

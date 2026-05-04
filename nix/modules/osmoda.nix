@@ -36,7 +36,7 @@ let
     };
   };
 
-  # Legacy OpenClaw config (for backward compat)
+  # OpenClaw runtime config (used when cfg.gateway.runtime = "openclaw")
   openclawConfig = {
     gateway.auth.mode = "none";
     plugins.allow = [ "osmoda-bridge" ];
@@ -74,7 +74,7 @@ in {
     # --- Gateway (Claude Code SDK or OpenClaw) ---
     gateway = {
       enable = mkOption { type = types.bool; default = true; description = "Enable osModa Gateway"; };
-      runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "claude-code"; description = "Agent runtime: claude-code (default) or openclaw (legacy)"; };
+      runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "claude-code"; description = "Agent runtime: claude-code (default; supports OAuth + API key) or openclaw (multi-provider BYOK CLI; API key only — does not accept OAuth)"; };
       port = mkOption { type = types.port; default = 18789; description = "Gateway port (user-facing)"; };
       internalPort = mkOption { type = types.port; default = 18790; description = "Internal gateway port (used when osModa UI fronts it)"; };
       model = mkOption { type = types.str; default = "anthropic/claude-opus-4-6"; description = "Default LLM model (main agent)"; };

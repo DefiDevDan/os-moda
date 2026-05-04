@@ -89,7 +89,8 @@ agents.json. In-flight sessions keep their original driver + credential snapshot
 ┌─────────────────────────────────────────────────────────────┐
 │ osmoda-gateway (:18789) — modular, TypeScript                 │
 │   reads agents.json → routes per-agent to a driver            │
-│   drivers: claude-code (default) · openclaw (legacy)          │
+│   drivers: claude-code (default · OAuth+API key)              │
+│            openclaw      (BYOK · API key only)                │
 │   osmoda-mcp-bridge → 92 MCP tools                            │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘

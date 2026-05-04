@@ -71,7 +71,7 @@ Short version: **OAuth if you have a Claude subscription**, API key otherwise.
 Every osModa server that runs a busy agent will comfortably burn $50–200/month in pay-per-token billing. A Claude Pro OAuth token is ~$20/month flat, near-unlimited for sustained agent workloads. That's usually the biggest recurring cost delta in the entire stack.
 
 OAuth caveats:
-- Only the `claude-code` runtime driver accepts OAuth. OpenClaw legacy uses API keys only (Anthropic disabled OAuth for OpenClaw).
+- Only the `claude-code` runtime driver accepts OAuth. OpenClaw uses API keys only — Anthropic does not issue OAuth tokens for OpenClaw, so this is a constraint of the engine, not a deprecation. The agent card's `runtimes[].supported_auth_types` is the source of truth (enforced server-side + dashboard-side + SDK-side).
 - Tokens can expire and need refresh via `claude setup-token`.
 - Anthropic treats subscription tokens with some API endpoints as restricted. If you see `"OAuth authentication is currently not supported"`, switch the credential type to `api_key` for that agent.
 

@@ -38,7 +38,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    endpoints (Bearer-authed) let the dashboard edit runtime/credentials/model per
    agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 92 MCP tools.
 
-2b. **osmoda-bridge** (TypeScript) — Legacy OpenClaw plugin. Registers tools via
+2b. **osmoda-bridge** (TypeScript) — OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
    `api.registerTool()` factory pattern (92 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
@@ -108,7 +108,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates gateway config from NixOS options (agents, bindings, channels).
    Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, full access, Telegram/WhatsApp).
-   `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (legacy).
+   `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (BYOK / non-Anthropic providers).
 
 13. **Multi-agent routing** — One gateway, multiple routed agents:
    - `osmoda` (default): Claude Opus, all 92 tools, all 20 skills, full system access
@@ -226,7 +226,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── index.js                       # MCP server entry + teachd auto-logging middleware
       ├── tools.js                       # All 92 tool definitions + handlers
       └── daemon-clients.js              # Unix socket HTTP clients for all daemons
-./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin (legacy)
+./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
   ├── index.ts                           # Plugin entry — 92 tools via api.registerTool()
@@ -287,7 +287,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ## Tech stack
 
 - **Rust**: agentd, agentctl, egress proxy, keyd, watch, routines, mesh (axum, rusqlite, tokio, sha2, clap, k256, ed25519-dalek, aes-gcm, sha3, snow, ml-kem)
-- **TypeScript**: osmoda-gateway (Claude Code SDK), osmoda-mcp-bridge (MCP server), osmoda-bridge (OpenClaw legacy)
+- **TypeScript**: osmoda-gateway (Claude Code SDK), osmoda-mcp-bridge (MCP server), osmoda-bridge (OpenClaw plugin)
 - **Nix**: flakes, crane (Rust builds), flake-utils (multi-system), nixos-generators
 - **NixOS**: systemd services, nftables, bubblewrap
 - **Desktop**: Sway (Wayland), kitty, Firefox

@@ -171,9 +171,9 @@ agentctl events --state-dir /var/lib/osmoda --limit 20
 
 ## Step 5: Switch the agent engine (optional)
 
-osModa ships with two drivers — `claude-code` (Anthropic's official CLI, supports OAuth + API key) and `openclaw` (legacy, API key only). Default is `claude-code`. You can swap at runtime, no SSH or rebuild:
+osModa ships with two drivers — `claude-code` (Anthropic's official CLI, supports OAuth + API key) and `openclaw` (multi-provider BYOK CLI; API key only — does not accept OAuth). Default is `claude-code`. You can swap at runtime, no SSH or rebuild:
 
-- **Dashboard:** Engine tab → Agents section → `osmoda` card → Runtime dropdown → pick `OpenClaw (legacy)` → Save.
+- **Dashboard:** Engine tab → Agents section → `osmoda` card → Runtime dropdown → pick `OpenClaw` → Save.
 - **REST API:**
   ```bash
   curl -X PATCH http://127.0.0.1:18789/config/agents/osmoda \

@@ -1,11 +1,11 @@
 {
   "name": "osmoda-bridge",
-  "version": "0.1.0",
-  "description": "osModa Bridge — 72 system tools connecting OpenClaw to all osModa daemons",
+  "version": "0.2.0",
+  "description": "osModa Bridge — 92 system tools connecting OpenClaw to all osModa daemons (peer to claude-code; selectable via gateway runtime)",
   "openclaw": {
     "extensions": ["./index.ts"]
   },
   "peerDependencies": {
-    "openclaw": ">=2026.1.26"
+    "openclaw": ">=2026.5.3"
   }
 }

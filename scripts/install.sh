@@ -84,7 +84,7 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
-RUNTIME="claude-code"  # claude-code (default) or openclaw (legacy)
+RUNTIME="claude-code"  # claude-code (default; OAuth + API key) or openclaw (BYOK; API key only)
 SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
 DEFAULT_MODEL=""       # initial default model for the osmoda agent
 # Repeatable --credential flag. Each value: `label|provider|type|base64-secret`
@@ -834,8 +834,8 @@ log "Step 7: Setting up multi-agent workspaces..."
 
 # Multi-agent workspace layout:
 #   /root/workspace/               — main agent (Opus, full access) [shared]
-#   ~/.openclaw/workspace-osmoda/  — OpenClaw main workspace (legacy)
-#   ~/.openclaw/workspace-mobile/  — OpenClaw mobile workspace (legacy)
+#   ~/.openclaw/workspace-osmoda/  — OpenClaw main workspace (used when runtime=openclaw)
+#   ~/.openclaw/workspace-mobile/  — OpenClaw mobile workspace (used when runtime=openclaw)
 #   /var/lib/osmoda/workspace-mobile/ — mobile agent workspace (Claude Code)
 OC_BASE="/root/.openclaw"
 WS_OSMODA="$OC_BASE/workspace-osmoda"

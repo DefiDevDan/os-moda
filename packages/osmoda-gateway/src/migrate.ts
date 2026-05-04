@@ -112,7 +112,10 @@ export function runMigrationIfNeeded(): MigrationReport {
     }
   } catch { /* not present — that's fine */ }
 
-  // 2. OpenClaw legacy — one credential per distinct agent auth file.
+  // 2. Pre-modular-runtime OpenClaw layout (auth-profiles.json per agent dir).
+  //    Migrate one credential per distinct agent auth file into the new
+  //    encrypted credential store. OpenClaw itself is a current first-class
+  //    runtime — only this on-disk layout is being phased out.
   const openClawCredByAgent: Record<string, string> = {};
   try {
     if (fs.existsSync(LEGACY_OPENCLAW_AGENTS)) {

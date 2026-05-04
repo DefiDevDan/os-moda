@@ -119,7 +119,7 @@ curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/
   --runtime claude-code \
   --credential "Anthropic Console|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
 
-# OpenClaw (legacy engine, API key only)
+# OpenClaw (BYOK / multi-provider engine, API key only — does not accept OAuth)
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
   --runtime openclaw \
   --credential "Anthropic|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
@@ -159,7 +159,7 @@ agentctl verify-ledger
 
 ## Architecture
 
-10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One modular gateway (`osmoda-gateway`, TypeScript) drives pluggable runtime drivers: `claude-code` (default, supports OAuth subscriptions or API keys) and `openclaw` (legacy, API-key only). Each agent picks its own runtime + credential + model; switch at runtime via the dashboard — no rebuilds.
+10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One modular gateway (`osmoda-gateway`, TypeScript) drives pluggable runtime drivers: `claude-code` (default, supports OAuth subscriptions or API keys) and `openclaw` (multi-provider BYOK CLI, API-key only — does not accept OAuth). Each agent picks its own runtime + credential + model; switch at runtime via the dashboard — no rebuilds.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐

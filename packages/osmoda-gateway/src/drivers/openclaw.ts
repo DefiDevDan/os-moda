@@ -1,11 +1,12 @@
 /**
  * OpenClaw driver — wraps the standalone `openclaw` binary as a child process.
  *
- * OpenClaw is legacy; it's kept as an advanced option for users who rely on
- * its plugin ecosystem. Credential handling is api_key only (Anthropic
- * disabled OAuth for OpenClaw). We write the credential into OpenClaw's
- * auth-profiles.json format before each session, because OpenClaw expects
- * that file at a known path.
+ * OpenClaw is a first-class peer to claude-code. Pick it for the OpenClaw
+ * plugin ecosystem or non-Anthropic providers. Credential handling is
+ * api_key only — Anthropic does not issue OAuth tokens for OpenClaw, so
+ * supported_auth_types is ["api_key"]. We write the credential into
+ * OpenClaw's auth-profiles.json format before each session, because
+ * OpenClaw expects that file at a known path.
  *
  * This driver uses OpenClaw's one-shot run mode (`openclaw run`) and parses
  * its JSON event stream on stdout. If OpenClaw isn't installed on the host,
@@ -63,12 +64,12 @@ function writeAuthProfile(agentId: string, cred: Credential): Promise<void> {
 
 export const openClawDriver: RuntimeDriver = {
   name: "openclaw",
-  displayName: "OpenClaw (legacy)",
+  displayName: "OpenClaw",
   description:
-    "Legacy self-hosted agent engine. API-key only (Anthropic disabled OAuth for OpenClaw). Best when you depend on OpenClaw-specific plugins.",
+    "OpenClaw multi-runtime CLI (BYOK). API key only — does not accept Claude Pro OAuth tokens. Pick this for the OpenClaw plugin ecosystem or non-Anthropic providers.",
   supportedProviders: ["anthropic", "openai"],
   supportedAuthTypes: ["api_key"],
-  defaultModels: ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5"],
+  defaultModels: ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "gpt-5"],
 
   async testCredential(cred: Credential): Promise<CredentialTestResult> {
     if (cred.type !== "api_key") {

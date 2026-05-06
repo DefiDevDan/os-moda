@@ -4,8 +4,11 @@ Last updated: 2026-05-04 · API version: **1.2.3**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
 
-**v1.2.3 (2026-05-04) — Swarms retired:**
+**v1.2.3 (2026-05-04 / 2026-05-06) — Swarms retired + smart watchdog + spawn-log:**
 - Removed the `Swarms (alpha)` family (`/api/v1/swarms/*`, 16 paths + 2 WS feeds). The same outcome — coordinated autonomous AI businesses — is now delivered by spawning a server, opening the chat WebSocket, and prompting the agent: every spawn ships with full system access plus the **Factories** (spec-kit) surface. The fictional Venture-orchestrator simulator is gone; ~2300 LOC retired.
+- **Smart 3-layer watchdog** (2026-05-06): the install monitor now runs every 60 s with three escalating detection layers: `cloud_init_silent` at 4 min (no callbacks at all), `phase_stalled` at 7 min (same phase no progress — auto SSH-tails the box and attaches the install-log tail to `install_error.log_tail`), `final_timeout` at 25 min (hard fail, existing).
+- **New `stalled` field on `StatusResponseFull`** — soft-warning state surfaced when a spawn is mid-stall but not yet hard-failed. Lets your dashboard show "we noticed it's slow, investigating…" instead of a frozen spinner. `{step, status, stuck_for_min, since}`. Cleared automatically when the next phase reports progress.
+- **Per-order spawn-log** (NDJSON) at `data/spawn-log/<order_id>.ndjson` — every lifecycle event timestamped + structured. Surfaced via `GET /api/dashboard/orders/{id}/spawn-log` (cookie-authed dashboard endpoint, owner-only) for the human-facing "what's happening with my spawn" panel. Not part of the v1 Bearer API surface — AI integrators get the same info from `provision_steps[]` + `install_error` + `stalled` in the status response.
 - No impact on stable v1 endpoints (`/plans`, `/spawn/:planId`, `/status/:orderId`, `/tokens/:token_id`, `/spec-kit/projects`, `/chat/{orderId}`, `/docs`, `/.well-known/agent-card.json`).
 
 **v1.2.2 (2026-04-30) — spec-driven development + auth-type gating:**

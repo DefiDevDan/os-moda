@@ -140,6 +140,19 @@ export interface StatusResponseFull extends StatusResponseBasic {
   install_failed_at?: string | null;
   /** v1.2.1: only present when status === "install_failed". */
   install_error?: InstallError;
+  /** v1.2.3: soft-warning state when an install has been stuck in the same
+   *  phase ≥7 min but is still within the 25-min hard timeout. Use this to
+   *  show "investigating…" UX instead of a frozen spinner. Cleared
+   *  automatically when the next phase reports progress. */
+  stalled?: StalledState | null;
+}
+
+/** v1.2.3 — soft-warning state surfaced by the smart watchdog. */
+export interface StalledState {
+  step: string;
+  status: "started" | "done" | "error";
+  stuck_for_min: number;
+  since: string;
 }
 
 export interface TokenMeta {

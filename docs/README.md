@@ -16,7 +16,7 @@ Entry point for the `docs/` tree. Start here, then follow links into the specifi
 
 ## If you're integrating osModa as an agent service
 
-1. **[SPAWN-API.md](SPAWN-API.md)** — full **v1.2.5** public API reference. `POST /api/v1/spawn/:planId` + credentials, idempotency, structured errors, token lifecycle, spec-kit project discovery, **SSE async chat** (`chat-async` / `chat-stream` / `chat-history`). Live spec at <https://spawn.os.moda/api/v1/docs>.
+1. **[SPAWN-API.md](SPAWN-API.md)** — full **v1.2.6** public API reference. `POST /api/v1/spawn/:planId` + credentials, idempotency, structured errors, token lifecycle, spec-kit project discovery, **SSE async chat** (`chat-async` / `chat-stream` / `chat-history`), **managed agent restart** (`POST /agents/:agent/restart`). Live spec at <https://spawn.os.moda/api/v1/docs>.
 2. **[X402.md](X402.md)** — USDC payment protocol (inbound for spawn, outbound for agents paying external APIs).
 3. **[AUTH.md](AUTH.md)** — how credentials work in v1.2: encrypted store, OAuth vs API key, multi-provider.
 4. **[@osmoda/client (TypeScript SDK)](../packages/osmoda-client/README.md)** — handwritten first-party SDK.

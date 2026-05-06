@@ -582,7 +582,9 @@ GET    /api/v1/spec-kit/projects      → Spec-driven project discovery (Bearer)
 POST   /api/dashboard/servers/:id/chat-async             → 202 (sk_live_, v1.2.5)
 GET    /api/dashboard/servers/:id/chat-stream/:conv_id   → SSE, cursor-resumable
 GET    /api/dashboard/servers/:id/chat-history/:conv_id  → JSON cold load
-GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.5, full schemas + examples)
+POST   /api/dashboard/servers/:id/agents/:agent/restart  → 202 (v1.2.6, wedged-agent recovery)
+GET    /api/dashboard/servers/:id/agents/:agent/restart/:rid → status: restarting|ready|timeout|failed
+GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.6, full schemas + examples)
 ```
 
 Every response carries `X-Request-Id`. Errors use a uniform envelope:

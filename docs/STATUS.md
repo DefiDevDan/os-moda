@@ -4,7 +4,13 @@ Honest assessment of what works, what's placeholder, and what's next.
 
 Last updated: 2026-05-06
 
-## Recent operational changes (2026-05-06)
+## Recent operational changes (2026-05-06 · v1.2.6)
+
+| Area | Change | Why |
+|---|---|---|
+| Agent control | **`v1.2.6` adds 2 dashboard endpoints + 1 derived field**: `POST /agents/:agent/restart` (202 with `restart_id`), `GET .../restart/:restart_id` (status: `restarting`/`ready`/`timeout`/`failed`). New `agent_responsive` boolean + `last_responsive_at` ts on the dashboard server-list response — derived from heartbeat staleness, no token burn. New `Agent control (dashboard)` tag in OpenAPI. Agent-card flags `agent_restart_endpoint:true`, `agent_responsiveness_probe:true`. install.sh patched: `chage -d $(today) root` so Hetzner PAM doesn't flag the root password as expired and block SSH key auth. | Real customer wedge on order `7e120a65-…`: chat-async accepted, agent silent for 3+ hours, heartbeat stale, SSH-restart blocked by Hetzner PAM password-expiry bug. Integrator's only paths were "delete + lose history" or "SSH yourself + hit the same PAM bug". The new endpoint surfaces a self-service restart and explicitly recommends delete+respawn when it hits the legacy PAM trap (which is now fixed for new spawns). |
+
+## Recent operational changes (2026-05-06 · v1.2.5)
 
 | Area | Change | Why |
 |---|---|---|
@@ -59,7 +65,7 @@ Last updated: 2026-05-06
 | Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
-| Spawn API version | 1.2.5 |
+| Spawn API version | 1.2.6 |
 | osmoda-gateway version | 0.2.0 |
 
 ---
@@ -432,7 +438,10 @@ token lifecycle, WS hardening.
 | `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
 | `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
 | `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
-| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.5** — 17 paths, 19 schemas, two security schemes (`bearerAuth: osk_` + `dashboardAuth: sk_live_`). Every schema has `example`. `/status` ships 3 named examples. Virtual `/api/v1/chat/{orderId}` path surfaces the WS protocol in Swagger UI. The 3 streaming chat endpoints under tag `Streaming chat (dashboard)` document the v1.2.5 SSE flow with a full sample event stream. `x-websocket` extension carries the WS frame protocol. Integrator quick-start in description. `redocly lint` 0 errors. |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.6** — 19 paths, 19 schemas, two security schemes (`bearerAuth: osk_` + `dashboardAuth: sk_live_`). Tags: Plans, Spawn, Status, Chat (WebSocket), Tokens, Docs, Callbacks, Standards, Spec-Kit, Streaming chat (dashboard), **Agent control (dashboard)**. `redocly lint` 0 errors. |
+| `POST /agents/:agent/restart` | **Solid** | v1.2.6 — managed restart for wedged agents. SSH `systemctl restart osmoda-gateway`, poll for heartbeat. 60 s budget. `fallback_recommendation: "delete_and_respawn"` set when SSH blocked by legacy PAM bug. |
+| `GET /agents/:agent/restart/:rid` | **Solid** | v1.2.6 — poll restart status. In-memory record, 30 min TTL. |
+| `agent_responsive` field | **Solid** | v1.2.6 — derived from heartbeat staleness (90 s window). Lets integrators warn before the 120 s timeout. Companion `last_responsive_at`. |
 | `POST /api/dashboard/servers/:id/chat-async` | **Solid** | v1.2.5 — returns 202 with `{conversation_id, message_id}`. Single-user concurrency (409 on overlap). Empty-reply mode → `error` event with `code:agent_silent`. |
 | `GET /chat-stream/:conversation_id` | **Solid** | v1.2.5 — SSE, cursor-resumable, 15 s keepalive, 30 min hard cap, 410 on cursor past terminal. NDJSON file is the source of truth for live + cold replay. |
 | `GET /chat-history/:conversation_id` | **Solid** | v1.2.5 — JSON cold load. 48 h retention sweep. |

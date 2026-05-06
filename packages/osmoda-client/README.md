@@ -1,8 +1,8 @@
 # @osmoda/client
 
-First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) — currently v1.2.5.
+First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) — currently v1.2.6.
 
-> The SDK wraps the v1 `osk_` Bearer surface (spawn → status → tokens → spec-kit). The dashboard SSE streaming chat (v1.2.5) is intentionally not wrapped — it uses a separate `sk_live_` auth and a browser-native `EventSource`. See `docs/SPAWN-API.md` § *Streaming chat* for a 60-line reference client.
+> The SDK wraps the v1 `osk_` Bearer surface (spawn → status → tokens → spec-kit). The dashboard `sk_live_` surface — SSE streaming chat (v1.2.5) and managed agent restart (v1.2.6) — is intentionally not wrapped. SSE is browser-native via `EventSource`, and restart is a tiny POST/GET pair. See `docs/SPAWN-API.md` for reference clients of both.
 
 ## Install
 

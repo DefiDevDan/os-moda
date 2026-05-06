@@ -1,8 +1,40 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-05-06 · API version: **1.2.5**
+Last updated: 2026-05-06 · API version: **1.2.6**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
+
+**v1.2.6 (2026-05-06) — Managed agent restart + responsiveness probe:**
+
+Two additive endpoints on the dashboard surface (`sk_live_` Bearer or session cookie auth) for the "agent process is alive but wedged" failure mode. Until now the only options were delete + respawn (loses chat history) or SSH yourself. This is self-service.
+
+- **`POST /api/dashboard/servers/:id/agents/:agent/restart`** — returns `202` immediately with `{restart_id, status:"restarting"}`. Background: SSH the box, run `systemctl restart osmoda-gateway`, poll for next heartbeat. If a restart is already in flight for that order+agent, returns the in-flight `restart_id` with `reused: true`.
+- **`GET /api/dashboard/servers/:id/agents/:agent/restart/:restart_id`** — polls the restart record. `status` ∈ `restarting` | `ready` | `timeout` | `failed`. On `failed`, the response includes a human-readable `error` and may include `fallback_recommendation: "delete_and_respawn"` (set when the failure is the Hetzner PAM password-expiry bug — see below).
+- **New `agent_responsive` field** on `GET /api/dashboard/servers` (list response): `true` iff a heartbeat landed within the last 90 seconds. Use this to surface "agent is unresponsive" *before* the user types and waits 120 s. Companion `last_responsive_at` is the heartbeat timestamp. **Zero token cost** — derived from existing heartbeats, not a probe prompt.
+- **install.sh patched** — `chage -d $(date +%Y-%m-%d)` now runs alongside the existing password-expiry fix, so future spawns can't trap themselves the way the only known stuck server in the wild did. Legacy spawns where this PAM bug already triggered need delete + respawn — the restart endpoint surfaces that recommendation explicitly when it can't SSH.
+
+Reference integration:
+```ts
+async function restartAgent(orderId, agentId) {
+  const start = await fetch(`/api/dashboard/servers/${orderId}/agents/${agentId}/restart`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SK_LIVE}` },
+  });
+  const { restart_id } = await start.json();
+  // Poll every 2 s
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const r = await fetch(
+      `/api/dashboard/servers/${orderId}/agents/${agentId}/restart/${restart_id}`,
+      { headers: { Authorization: `Bearer ${SK_LIVE}` } }
+    );
+    const s = await r.json();
+    if (s.status === "ready")   return s;          // heartbeat resumed
+    if (s.status === "failed")  throw new Error(`${s.error} ${s.fallback_recommendation ?? ""}`);
+    if (s.status === "timeout") return s;          // gateway came back up but didn't heartbeat in 60 s
+  }
+}
+```
 
 **v1.2.5 (2026-05-06) — SSE-based async chat with resumable streaming:**
 

@@ -2,7 +2,13 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-05-04
+Last updated: 2026-05-06
+
+## Recent operational changes (2026-05-06)
+
+| Area | Change | Why |
+|---|---|---|
+| Streaming chat | **`v1.2.5` adds 3 dashboard endpoints**: `chat-async` (202 with `conversation_id`), `chat-stream` (SSE, cursor-resumable, 15 s keepalive), `chat-history` (JSON cold load). New `dashboardAuth` security scheme + `Streaming chat (dashboard)` tag in OpenAPI. New `ChatEvent` schema. New agent-card capabilities: `dashboard_streaming_chat:true`, `streaming_chat_protocol:"sse"`. Persistence at `data/chat-events/<conv>.ndjson` (append-only, 48 h sweep). | The platform integrating osModa (topimones.lt) had a UX gap — the synchronous `/chat` endpoint blocks for up to 120 s and the integrating UI couldn't show "agent is running tool X" or partial deltas, and a page refresh during a long reply lost in-flight state. The new flow mirrors the `/paieska` SSE pattern: `EventSource` reader + cursor-based resume. Integrator client diff drops to ~120 lines. |
 
 ## Recent operational changes (2026-05-04)
 
@@ -53,7 +59,7 @@ Last updated: 2026-05-04
 | Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
-| Spawn API version | 1.2.3 |
+| Spawn API version | 1.2.5 |
 | osmoda-gateway version | 0.2.0 |
 
 ---
@@ -426,7 +432,10 @@ token lifecycle, WS hardening.
 | `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
 | `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
 | `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
-| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.3** — 14 paths, 18 schemas, every schema has `example`, `/status` ships 3 named examples, `bearerAuth`, virtual `/api/v1/chat/{orderId}` path so Swagger UI surfaces the WS protocol, `x-websocket` extension with full frame protocol, integrator quick-start in description. `redocly lint` 0 errors. |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.5** — 17 paths, 19 schemas, two security schemes (`bearerAuth: osk_` + `dashboardAuth: sk_live_`). Every schema has `example`. `/status` ships 3 named examples. Virtual `/api/v1/chat/{orderId}` path surfaces the WS protocol in Swagger UI. The 3 streaming chat endpoints under tag `Streaming chat (dashboard)` document the v1.2.5 SSE flow with a full sample event stream. `x-websocket` extension carries the WS frame protocol. Integrator quick-start in description. `redocly lint` 0 errors. |
+| `POST /api/dashboard/servers/:id/chat-async` | **Solid** | v1.2.5 — returns 202 with `{conversation_id, message_id}`. Single-user concurrency (409 on overlap). Empty-reply mode → `error` event with `code:agent_silent`. |
+| `GET /chat-stream/:conversation_id` | **Solid** | v1.2.5 — SSE, cursor-resumable, 15 s keepalive, 30 min hard cap, 410 on cursor past terminal. NDJSON file is the source of truth for live + cold replay. |
+| `GET /chat-history/:conversation_id` | **Solid** | v1.2.5 — JSON cold load. 48 h retention sweep. |
 | `GET /api/v1/spec-kit/projects` | **Functional** | Bearer-required. Aggregates spec-driven projects from heartbeat. Powers the per-server **Factories** dashboard tab. |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | Structured error envelope | **Solid** | `{code, message, detail?, request_id, error}` on every /api/v1/* + agent-card error; legacy `error` kept one release |

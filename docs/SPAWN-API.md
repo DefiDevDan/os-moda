@@ -1,8 +1,52 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-05-04 · API version: **1.2.3**
+Last updated: 2026-05-06 · API version: **1.2.5**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
+
+**v1.2.5 (2026-05-06) — SSE-based async chat with resumable streaming:**
+
+Three additive endpoints on the dashboard surface (`sk_live_` Bearer or session cookie auth — distinct from the v1 `osk_` Bearer used by the rest of this API). The legacy synchronous `POST /chat` stays for compatibility.
+
+- **`POST /api/dashboard/servers/:id/chat-async`** — body `{message, model?}`. Returns `202` immediately with `{conversation_id, message_id}`. The agent runs in the background; clients consume events via the next two endpoints.
+- **`GET /api/dashboard/servers/:id/chat-stream/:conversation_id?cursor=N`** — `text/event-stream`. Replays every `ChatEvent` with `id > cursor` from the persistent NDJSON log, then attaches live for new events. Closes with `event: close` when the conversation reaches a terminal event (`done` or `error`). 15 s keepalive comments so Cloudflare/nginx don't cut idle streams. Cursor past terminal returns `410 conversation_terminated`.
+- **`GET /api/dashboard/servers/:id/chat-history/:conversation_id`** — full event log as JSON. For cold loads (refresh hours later) and non-SSE clients.
+- **`ChatEvent` envelope** (discriminated by `type`):
+  - `phase` — `{phase: "thinking" | "answering"}`
+  - `tool_call_start` — `{tool, args_preview}`
+  - `tool_call_done` — `{tool, result_preview, ok, duration_ms}`
+  - `delta` — `{text}` (an assistant token chunk)
+  - `done` — `{final_text, tokens_in?, tokens_out?}` (terminal)
+  - `error` — `{code, message}` (terminal — e.g. `code:"agent_silent"` when the model never streamed within 120 s)
+- **Persistence**: append-only NDJSON at `data/chat-events/<conversation_id>.ndjson`. Retention ≥ 24 h after terminal (default sweep 48 h). The NDJSON file is the source of truth for both live and cold replay.
+- **Concurrency**: only one chat-async can be in flight per server (single-user-watching-single-agent assumption). A second concurrent request returns `409 conversation_in_progress`.
+- **Out of scope for v1.2.5**: cancelling an in-flight agent, multi-turn parallelism on a single conversation, WebSocket parity for dashboard auth.
+
+Reference integration (60-line client):
+```ts
+// Start the agent run
+const r = await fetch(`/api/dashboard/servers/${orderId}/chat-async`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${SK_LIVE}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ message: prompt }),
+});
+const { conversation_id, message_id } = await r.json();
+
+// Stream events live (resumable on refresh via lastSeenId)
+let lastSeenId = 0;
+const es = new EventSource(
+  `/api/dashboard/servers/${orderId}/chat-stream/${conversation_id}?cursor=${lastSeenId}`
+);
+es.addEventListener("chat", (ev) => {
+  const e = JSON.parse(ev.data);  // ChatEvent
+  lastSeenId = e.id;
+  if (e.type === "delta")     append(e.text);
+  if (e.type === "tool_call_start") showTool(e.tool);
+  if (e.type === "done")      finalize(e.final_text);
+  if (e.type === "error")     showError(e.code, e.message);
+});
+es.addEventListener("close", () => es.close());
+```
 
 **v1.2.3 (2026-05-04 / 2026-05-06) — Swarms retired + smart watchdog + spawn-log:**
 - Removed the `Swarms (alpha)` family (`/api/v1/swarms/*`, 16 paths + 2 WS feeds). The same outcome — coordinated autonomous AI businesses — is now delivered by spawning a server, opening the chat WebSocket, and prompting the agent: every spawn ships with full system access plus the **Factories** (spec-kit) surface. The fictional Venture-orchestrator simulator is gone; ~2300 LOC retired.

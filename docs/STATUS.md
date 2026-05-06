@@ -4,6 +4,12 @@ Honest assessment of what works, what's placeholder, and what's next.
 
 Last updated: 2026-05-06
 
+## Recent operational changes (2026-05-06 · v1.2.7)
+
+| Area | Change | Why |
+|---|---|---|
+| PAM hardening | **`v1.2.7` adds 3 layers of defense against the Hetzner Ubuntu PAM password-expiry trap**: (1) install.sh installs `osmoda-pam-self-heal.service` — boot-time idempotent re-application of the chage fix; (2) `sshExec()` on the spawn server detects the `Password change required but no TTY` error and auto-recovers via Hetzner `reset_password` API + `sshpass` + chage fix + retry; (3) wedged-server detector flips `agent_wedged:true` on running orders with >5 min stale heartbeat, then auto-kicks the v1.2.6 `agent_restart`. New agent-card flags `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`. | A real customer wedge (order `7e120a65-574f-…`) couldn't be remotely recovered: SSH key auth was being blocked by PAM after Hetzner's `chage` quirk. Delete+respawn was the only path, losing chat history. v1.2.7 closes that gap on every layer (install-time, run-time, operationally). Most future wedges should self-heal in 30–60 s. |
+
 ## Recent operational changes (2026-05-06 · v1.2.6)
 
 | Area | Change | Why |
@@ -65,7 +71,7 @@ Last updated: 2026-05-06
 | Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
-| Spawn API version | 1.2.6 |
+| Spawn API version | 1.2.7 |
 | osmoda-gateway version | 0.2.0 |
 
 ---
@@ -438,7 +444,10 @@ token lifecycle, WS hardening.
 | `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
 | `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
 | `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
-| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.6** — 19 paths, 19 schemas, two security schemes (`bearerAuth: osk_` + `dashboardAuth: sk_live_`). Tags: Plans, Spawn, Status, Chat (WebSocket), Tokens, Docs, Callbacks, Standards, Spec-Kit, Streaming chat (dashboard), **Agent control (dashboard)**. `redocly lint` 0 errors. |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.7** — 19 paths, 19 schemas, two security schemes. Tags: Plans, Spawn, Status, Chat (WebSocket), Tokens, Docs, Callbacks, Standards, Spec-Kit, Streaming chat (dashboard), Agent control (dashboard). `redocly lint` 0 errors. |
+| Wedge detector | **Solid** | v1.2.7 — runs every 60 s. Flips `agent_wedged:true` on stale-heartbeat running orders. Auto-kicks restart. |
+| sshExec auto-recovery | **Solid** | v1.2.7 — Hetzner `reset_password` fallback when PAM blocks. Recovers legacy stuck servers without delete+respawn. |
+| osmoda-pam-self-heal.service | **Solid** | v1.2.7 — installed by install.sh on every spawn. Boot-time idempotent chage fix. Survives base-image regressions. |
 | `POST /agents/:agent/restart` | **Solid** | v1.2.6 — managed restart for wedged agents. SSH `systemctl restart osmoda-gateway`, poll for heartbeat. 60 s budget. `fallback_recommendation: "delete_and_respawn"` set when SSH blocked by legacy PAM bug. |
 | `GET /agents/:agent/restart/:rid` | **Solid** | v1.2.6 — poll restart status. In-memory record, 30 min TTL. |
 | `agent_responsive` field | **Solid** | v1.2.6 — derived from heartbeat staleness (90 s window). Lets integrators warn before the 120 s timeout. Companion `last_responsive_at`. |

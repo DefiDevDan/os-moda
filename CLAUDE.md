@@ -584,7 +584,11 @@ GET    /api/dashboard/servers/:id/chat-stream/:conv_id   → SSE, cursor-resumab
 GET    /api/dashboard/servers/:id/chat-history/:conv_id  → JSON cold load
 POST   /api/dashboard/servers/:id/agents/:agent/restart  → 202 (v1.2.6, wedged-agent recovery)
 GET    /api/dashboard/servers/:id/agents/:agent/restart/:rid → status: restarting|ready|timeout|failed
-GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.6, full schemas + examples)
+GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.7, full schemas + examples)
+                                        v1.2.7 ops hardening (no public surface change):
+                                        · install.sh osmoda-pam-self-heal.service (boot-time chage fix)
+                                        · sshExec auto-recovery via Hetzner reset_password on PAM trap
+                                        · 60 s wedge detector — auto-kicks restart on stale heartbeat
 ```
 
 Every response carries `X-Request-Id`. Errors use a uniform envelope:

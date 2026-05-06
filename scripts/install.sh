@@ -258,10 +258,38 @@ log "Pre-flight checks passed."
 # ---------------------------------------------------------------------------
 # Fix password expiry — Hetzner Ubuntu 24.04 sets root password to expired,
 # which makes PAM block SSH key auth ("Password change required but no TTY").
-# Clear it so key-based SSH works immediately.
+# Clear it so key-based SSH works immediately. Defense in depth:
+#   1. passwd -d              — clear the password field
+#   2. chage -d <today>       — reset SP_LSTCHG so PAM doesn't see expiry
+#   3. chage -I -1 ...        — disable inactive/min/max/expire
+#   4. boot-time systemd unit — re-run on every reboot (defense vs. base
+#                               image regenerating shadow during updates)
 # ---------------------------------------------------------------------------
 passwd -d root 2>/dev/null || true
 chage -I -1 -m 0 -M 99999 -E -1 -d "$(date +%Y-%m-%d)" root 2>/dev/null || true
+
+# Persistent self-heal: re-run the fix at every boot. Idempotent — only does
+# work if PAM has flagged the password as expired. Survives any base-image
+# update that might re-set SP_LSTCHG to 0.
+mkdir -p /etc/systemd/system
+cat > /etc/systemd/system/osmoda-pam-self-heal.service <<'PAMEOF'
+[Unit]
+Description=osModa — clear root password expiry so SSH key auth works
+ConditionPathExists=/etc/shadow
+After=local-fs.target
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'if chage -l root 2>/dev/null | grep -q "password must be changed"; then passwd -d root || true; chage -I -1 -m 0 -M 99999 -E -1 -d "$(date +%%Y-%%m-%%d)" root || true; fi'
+
+[Install]
+WantedBy=multi-user.target
+PAMEOF
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable osmoda-pam-self-heal.service 2>/dev/null || true
+systemctl start osmoda-pam-self-heal.service 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 1: NixOS conversion (via nixos-infect)

@@ -1,6 +1,6 @@
 # @osmoda/client
 
-First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) — currently v1.2.6.
+First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) — currently v1.2.7.
 
 > The SDK wraps the v1 `osk_` Bearer surface (spawn → status → tokens → spec-kit). The dashboard `sk_live_` surface — SSE streaming chat (v1.2.5) and managed agent restart (v1.2.6) — is intentionally not wrapped. SSE is browser-native via `EventSource`, and restart is a tiny POST/GET pair. See `docs/SPAWN-API.md` for reference clients of both.
 

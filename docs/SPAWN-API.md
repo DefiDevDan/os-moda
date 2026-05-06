@@ -1,8 +1,18 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-05-06 · API version: **1.2.6**
+Last updated: 2026-05-06 · API version: **1.2.7**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
+
+**v1.2.7 (2026-05-06) — Bulletproof PAM-expiry fix + Hetzner reset-password fallback:**
+
+Three independent layers of defense so the failure mode that wedged a real customer agent (Hetzner Ubuntu PAM password-expiry blocking SSH session setup → unrecoverable without delete + respawn) cannot happen again. **No new public endpoints** — this is operational hardening + a self-healing recovery path that's transparent to integrators. New agent-card capability flags advertise the protection: `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`.
+
+- **Layer 1 — install.sh hardening** (cloud-init layer). Adds an `osmoda-pam-self-heal.service` systemd unit that runs at every boot, before sshd starts. The unit re-applies `passwd -d root && chage -d <today> -E -1 -I -1 -M 99999 root` *only if* PAM has flagged the password as expired. Idempotent. Survives any base-image regression.
+- **Layer 2 — `sshExec()` auto-recovery** (spawn-server layer). When a spawn-side SSH operation fails with `Password change required but no TTY available`, the spawn server automatically: (a) calls Hetzner `POST /servers/:id/actions/reset_password` to mint a new root password, (b) waits 12 s for propagation, (c) `sshpass`-logs in with the new password, (d) runs the same `chage` fix the install.sh self-heal would have run, (e) `passwd -l root` to re-lock password auth, (f) retries the original SSH command. Any SSH-dependent operation (file browser, agent restart, api-key delivery) now self-heals on legacy stuck spawns. Returns `recovery_attempted: true, recovery_method: "reset_password"` in the result envelope so dashboards can surface "we auto-recovered your server" in real time.
+- **Layer 3 — Wedged-server detector** (watchdog layer). New 60 s loop: any order with `status: "running"` AND `setup_complete: true` AND `last_heartbeat` >5 min stale flips `agent_wedged: true` (now also a field on the dashboard server-list response). The detector auto-kicks the v1.2.6 `agent_restart` flow on the wedge transition — which itself uses Layer 2 if SSH is blocked. Outcome: most wedges self-heal in 30–60 s with **zero operator intervention**; the dashboard just shows a brief "agent wedged → recovered" status.
+
+**No client work required.** Existing integrators continue using `agent_responsive` from v1.2.6; the new `agent_wedged` field is additive. The v1.2.6 restart endpoint behavior is unchanged externally — internally it now benefits from Layer 2 auto-recovery.
 
 **v1.2.6 (2026-05-06) — Managed agent restart + responsiveness probe:**
 

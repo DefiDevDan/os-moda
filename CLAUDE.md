@@ -1,4 +1,4 @@
-# CLAUDE.md — osModa
+# CLAUDE.md - osModa
 
 ## What this is
 
@@ -20,25 +20,25 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 
 ## Components
 
-1. **agentd** (Rust) — system bridge daemon. Unix socket API at `/run/osmoda/agentd.sock`.
+1. **agentd** (Rust) - system bridge daemon. Unix socket API at `/run/osmoda/agentd.sock`.
    Gives OpenClaw structured access to: processes, services, network, filesystem, NixOS config,
    sysctl parameters, users, firewall. Append-only hash-chained event log in SQLite.
    Memory system endpoints for ingest/recall/store.
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **osmoda-gateway** (TypeScript) — **Modular agent gateway** (v0.2+). HTTP+WS server on port 18789.
+2. **osmoda-gateway** (TypeScript) - **Modular agent gateway** (v0.2+). HTTP+WS server on port 18789.
    Always the systemd unit. Routes per-agent to a pluggable runtime driver:
-   - `claude-code` driver — wraps `claude` CLI (OAuth or API key)
-   - `openclaw` driver — spawns `openclaw` binary as child process per session
+   - `claude-code` driver - wraps `claude` CLI (OAuth or API key)
+   - `openclaw` driver - spawns `openclaw` binary as child process per session
    - Adding a driver = one file under `src/drivers/` (Codex, Bedrock, …)
    Hot-reloadable config via `agents.json` (SIGHUP re-reads, in-flight sessions keep
-   their snapshot — zero WS drops). Encrypted credential store at
+   their snapshot - zero WS drops). Encrypted credential store at
    `/var/lib/osmoda/config/credentials.json.enc` (AES-256-GCM). REST `/config/*`
    endpoints (Bearer-authed) let the dashboard edit runtime/credentials/model per
    agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 92 MCP tools.
 
-2b. **osmoda-bridge** (TypeScript) — OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
+2b. **osmoda-bridge** (TypeScript) - OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
    `api.registerTool()` factory pattern (92 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
@@ -63,35 +63,35 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    app_deploy, app_list, app_logs, app_stop, app_restart, app_remove,
    safety_rollback, safety_status, safety_panic, safety_restart.
 
-3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
+3. **osmoda-egress** (Rust) - localhost-only HTTP CONNECT proxy. Domain allowlist
    per capability token. Only path to internet for sandboxed tools.
 
-4. **osmoda-keyd** (Rust) — OS-native crypto wallet daemon. Unix socket at `/run/osmoda/keyd.sock`.
+4. **osmoda-keyd** (Rust) - OS-native crypto wallet daemon. Unix socket at `/run/osmoda/keyd.sock`.
    AES-256-GCM encrypted keys, policy-gated signing (daily limits), ETH + SOL wallets.
    Runs with PrivateNetwork=true (zero network access). Keys never leave keyd.
    SignerBackend trait allows future MPC/HSM/Vault integration.
 
-5. **osmoda-watch** (Rust) — SafeSwitch + autopilot watchers. Unix socket at `/run/osmoda/watch.sock`.
+5. **osmoda-watch** (Rust) - SafeSwitch + autopilot watchers. Unix socket at `/run/osmoda/watch.sock`.
    Deploy transactions with timer + health gates + auto-rollback.
    Autopilot watchers: deterministic health checks with escalation (restart → rollback → notify).
 
-6. **osmoda-routines** (Rust) — background cron/event/webhook automation engine.
+6. **osmoda-routines** (Rust) - background cron/event/webhook automation engine.
    Unix socket at `/run/osmoda/routines.sock`.
    Runs scheduled tasks between agent conversations (health checks, service monitors, log scans).
    Default routines match HEARTBEAT.md cadences.
 
-7. **osmoda-voice** (Rust) — Local speech-to-text (whisper.cpp) + text-to-speech (piper).
+7. **osmoda-voice** (Rust) - Local speech-to-text (whisper.cpp) + text-to-speech (piper).
    Unix socket at `/run/osmoda/voice.sock`. All processing on-device. No cloud APIs.
 
-8. **osmoda-mesh** (Rust) — P2P encrypted agent-to-agent communication daemon. Unix socket at `/run/osmoda/mesh.sock`,
+8. **osmoda-mesh** (Rust) - P2P encrypted agent-to-agent communication daemon. Unix socket at `/run/osmoda/mesh.sock`,
    TCP listener at port 18800. Noise_XX (X25519/ChaChaPoly/BLAKE2s) + ML-KEM-768 hybrid post-quantum.
    Invite-based pairing, no central server. Ed25519 identity signatures.
 
-9. **osmoda-mcpd** (Rust) — MCP server manager daemon. Unix socket at `/run/osmoda/mcpd.sock`.
+9. **osmoda-mcpd** (Rust) - MCP server manager daemon. Unix socket at `/run/osmoda/mcpd.sock`.
    Manages MCP server lifecycle: start, monitor, restart, configure. Generates OpenClaw MCP
    config from NixOS options. Any MCP server becomes an OS capability via NixOS config.
 
-10. **osmoda-teachd** (Rust) — System learning & self-optimization daemon. Unix socket at `/run/osmoda/teachd.sock`.
+10. **osmoda-teachd** (Rust) - System learning & self-optimization daemon. Unix socket at `/run/osmoda/teachd.sock`.
     OBSERVE loop (30s): collects CPU, memory, service, journal observations into SQLite.
     LEARN loop (5m): detects patterns (recurring failures, resource trends, anomalies, correlations) → generates knowledge docs.
     SKILLGEN loop (6h): detects repeated agent tool sequences across sessions → auto-generates SKILL.md files.
@@ -99,18 +99,18 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
     TEACH API: context-aware knowledge injection for the agent.
     Optimizer: suggests and applies system optimizations via SafeSwitch.
 
-11. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
+11. **System Skills** (SKILL.md) - self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
    file-manager, network-manager, service-explorer, app-deployer, deploy-ai-agent,
    swarm-predict, scaled-swarm-predict.
 
-12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
+12. **NixOS module** (osmoda.nix) - single module that wires everything as systemd services.
    Generates gateway config from NixOS options (agents, bindings, channels).
    Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, full access, Telegram/WhatsApp).
    `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (BYOK / non-Anthropic providers).
 
-13. **Multi-agent routing** — One gateway, multiple routed agents:
+13. **Multi-agent routing** - One gateway, multiple routed agents:
    - `osmoda` (default): Claude Opus, all 92 tools, all 20 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace and system prompt. Config at `/var/lib/osmoda/config/gateway.json`.
@@ -229,7 +229,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 92 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry - 92 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -271,9 +271,9 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
           └── SOUL.md                    # Concise, phone-optimized responses
 ./scripts/
   ├── install.sh                         # One-command installer (curl | bash)
-  └── deploy-hetzner.sh                  # Push deploy from local to Hetzner
+  └── deploy-hetzner.sh                  # Push deploy from local to cloud provider
 ./docs/
-  ├── ARCHITECTURE.md                    # Architecture overview (all 9 daemons)
+  ├── ARCHITECTURE.md                    # Architecture overview (10 daemons: 9 Rust + 1 TS gateway)
   ├── STATUS.md                          # Honest maturity assessment per component
   ├── DEMO-SCRIPT.md                     # Demo recording script
   ├── GO-TO-MARKET.md                    # Launch strategy
@@ -316,14 +316,14 @@ cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
 
 ## Implementation order
 
-1. **flake.nix** — all inputs, nixosConfigurations for vm + iso
-2. **crates/agentd** — minimal: /health + /system/query(processes) + /events/log + hash chain
-3. **nix/modules/osmoda.nix** — agentd + gateway as systemd services
-4. **nix/hosts/dev-vm.nix** — Sway desktop, auto-login, gateway running
-5. **packages/osmoda-bridge** — register system_query + system_health as OpenClaw tools
-6. **skills/system-monitor/SKILL.md** — first skill
-7. **templates/** — agent identity
-8. **BUILD VM AND TEST END-TO-END** — don't proceed until this works
+1. **flake.nix** - all inputs, nixosConfigurations for vm + iso
+2. **crates/agentd** - minimal: /health + /system/query(processes) + /events/log + hash chain
+3. **nix/modules/osmoda.nix** - agentd + gateway as systemd services
+4. **nix/hosts/dev-vm.nix** - Sway desktop, auto-login, gateway running
+5. **packages/osmoda-bridge** - register system_query + system_health as OpenClaw tools
+6. **skills/system-monitor/SKILL.md** - first skill
+7. **templates/** - agent identity
+8. **BUILD VM AND TEST END-TO-END** - don't proceed until this works
 9. Expand agentd: /system/mutate, /nix/rebuild, /nix/search
 10. More skills, sandbox, egress proxy, agentctl
 
@@ -496,12 +496,12 @@ CREATE TABLE events (
 -- hash = SHA-256(id|ts|type|actor|payload|prev_hash)   -- pipe-delimited
 ```
 
-## Memory system (M0 — simplified ZVEC)
+## Memory system (M0 - simplified ZVEC)
 
 ### Engine
-- Single ZVEC collection (NOT three tiers — defer tiering to M2)
+- Single ZVEC collection (NOT three tiers - defer tiering to M2)
 - Single embedding model: nomic-embed-text-v2-moe (Q8_0, 512MB, 768-dim)
-- RRF (Reciprocal Rank Fusion) for hybrid merge — simpler than weighted scores
+- RRF (Reciprocal Rank Fusion) for hybrid merge - simpler than weighted scores
 - SQLite FTS5 alongside ZVEC for BM25 keyword search
 - Relevance score threshold for injection count (NOT hardcoded 6)
 - Token budget cap: max ~1500 tokens injected per prompt
@@ -514,7 +514,7 @@ the plugin handles vector search. No Rust FFI complexity.
 
 ### Ground truth
 Markdown files remain source of truth (OpenClaw compatible).
-ZVEC indexes are derived — always rebuildable from files.
+ZVEC indexes are derived - always rebuildable from files.
 Path: `/var/lib/osmoda/memory/`
 
 ### Deferred to M2+
@@ -536,7 +536,7 @@ Path: `/var/lib/osmoda/memory/`
 - `nix flake check` must pass at all times.
 - `cargo check --workspace` must pass at all times.
 
-## spawn.os.moda — Hosted Provisioning (gitignored, deployed via push.sh)
+## spawn.os.moda - Hosted Provisioning (gitignored, deployed via push.sh)
 
 Separate from the OS codebase. Lives in `apps/spawn/` (gitignored). Deployed via `bash push.sh` to the spawn server.
 
@@ -558,10 +558,10 @@ Separate from the OS codebase. Lives in `apps/spawn/` (gitignored). Deployed via
 ### Dashboard orchestration cards
 
 Overview tab shows 4 new cards (conditional, only when data exists):
-- **Automation** — routines with interval/last-run, watchers with check-type/status
-- **Activity Feed** — 15 most recent agentd events
-- **Intelligence** — teachd stats + detected patterns with confidence
-- **Tool Servers** — MCP server list with status/uptime
+- **Automation** - routines with interval/last-run, watchers with check-type/status
+- **Activity Feed** - 15 most recent agentd events
+- **Intelligence** - teachd stats + detected patterns with confidence
+- **Tool Servers** - MCP server list with status/uptime
 
 ### v1 Programmatic API (x402 payment-gated)
 
@@ -584,17 +584,50 @@ GET    /api/dashboard/servers/:id/chat-stream/:conv_id   → SSE, cursor-resumab
 GET    /api/dashboard/servers/:id/chat-history/:conv_id  → JSON cold load
 POST   /api/dashboard/servers/:id/agents/:agent/restart  → 202 (v1.2.6, wedged-agent recovery)
 GET    /api/dashboard/servers/:id/agents/:agent/restart/:rid → status: restarting|ready|timeout|failed
-GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.2.7, full schemas + examples)
+GET    /api/v1/servers/:id/events                        → SSE stream (v1.3.0, osk_ Bearer)
+GET    /api/v1/servers/:id/requests                      → request history (v1.3.0)
+GET    /api/v1/servers/:id/requests/:request_id          → single receipt (v1.3.0)
+GET    /api/dashboard/servers/:id/events                 → SSE stream (v1.3.0, sk_live_ / cookie)
+GET    /api/dashboard/servers/:id/requests               → request history (v1.3.0)
+GET    /api/dashboard/servers/:id/requests/:request_id   → single receipt (v1.3.0)
+POST   /api/dashboard/servers/:id/api-key                → 202 (v1.3.0, returns request_id)
+GET    /api/v1/servers/:id/spawn-log                     → NDJSON event log (v1.3.1, osk_)
+GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.3.1, full schemas + examples)
+                                        v1.3.1 wedge-detection hardening:
+                                        · `chat_responsive` field on server-list response — gate
+                                          `canChat` on `chat_responsive !== false` (decouples wedge
+                                          detection from heartbeat path; catches the daemon-alive-
+                                          but-chat-wedged failure mode)
+                                        · Auto-restart retries with backoff (0/5/10/30 min, max 4)
+                                          before emitting `agent.escalation_required` — fixes the
+                                          one-shot bug where one SSH failure left orders wedged
+                                        · `auto_restart_attempts`, `auto_restart_status`,
+                                          `last_auto_restart_attempt_at`, `agent_last_frame_at`
+                                          fields surfaced on dashboard + reseller spawn-log
+                                        · Reseller GET /spawn-log mirrors the dashboard surface for
+                                          self-serve diagnosis (no tickets needed)
+                                        · Typed 503 codes: `gateway_wedged` | `gateway_unreachable`
+                                          | `agent_disconnected` (was bare `agent_disconnected`),
+                                          each with `fallback_recommendation`
+                                        · Stale conversation auto-clear after 6 min (no more
+                                          permanent 409 lockout from a dead prior chat)
+                                        v1.3.0 unified server-event plane:
+                                        · Per-server SSE stream — all async actions, one subscription
+                                        · Universal `request_id` receipts — chat/restart/key delivery
+                                        · `state.changed` (has_api_key flips), agent.wedged/healed,
+                                          heartbeat.received, install.progress events
+                                        · Truthful `has_api_key` — derived from heartbeat-confirmed
+                                          credential delivery, not the chosen-provider field
                                         v1.2.7 ops hardening (no public surface change):
                                         · install.sh osmoda-pam-self-heal.service (boot-time chage fix)
-                                        · sshExec auto-recovery via Hetzner reset_password on PAM trap
-                                        · 60 s wedge detector — auto-kicks restart on stale heartbeat
+                                        · sshExec auto-recovery via cloud-provider reset_password on PAM trap
+                                        · 60 s wedge detector - auto-kicks restart on stale heartbeat
 ```
 
 Every response carries `X-Request-Id`. Errors use a uniform envelope:
 `{ code, message, detail?, request_id, error }` (the `error` field is a legacy alias for `code`).
 Rate-limited (429) responses include `Retry-After` in seconds. Per-token quotas: spawn 10/h,
-status 120/min — applied when a valid `Bearer osk_` token is present.
+status 120/min - applied when a valid `Bearer osk_` token is present.
 
 Dependencies: `@x402/express`, `@x402/core`, `@x402/evm`. Graceful fallback if not installed.
 Token metadata persists in `apps/spawn/data/tokens.enc` (AES-256-GCM, same pattern as orders).
@@ -618,7 +651,7 @@ that pre-configure the server's agent engine:
 
 Values are passed to cloud-init as `--runtime`, `--default-model`, and one
 `--credential` flag per credential. The new server boots with agents.json +
-credentials.json already populated — no SSH needed. Legacy `api_key` + `ai_provider`
+credentials.json already populated - no SSH needed. Legacy `api_key` + `ai_provider`
 fields still work (auto-migrated into a credential).
 
 ### Per-server modular config (SSH-free runtime switching)
@@ -642,7 +675,7 @@ Proxy tunnels over SSH with `spawn_mgmt_ed25519` and curl's the customer
 server's `127.0.0.1:18789/config/*` using that server's gateway-token.
 
 Dashboard exposes this as the **Engine** tab on each server detail page:
-three sections — Credentials, Agents, Available engines — with add / test /
+three sections - Credentials, Agents, Available engines - with add / test /
 set-default / runtime dropdown / credential dropdown / model dropdown. Save
 triggers SIGHUP on the customer gateway; in-flight chat sessions are
 unaffected.

@@ -1,8 +1,10 @@
 # @osmoda/client
 
-First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) — currently v1.2.7.
+First-party TypeScript client for the [osModa Spawn API](https://spawn.os.moda) - currently v1.3.1.
 
-> The SDK wraps the v1 `osk_` Bearer surface (spawn → status → tokens → spec-kit). The dashboard `sk_live_` surface — SSE streaming chat (v1.2.5) and managed agent restart (v1.2.6) — is intentionally not wrapped. SSE is browser-native via `EventSource`, and restart is a tiny POST/GET pair. See `docs/SPAWN-API.md` for reference clients of both.
+> The SDK wraps the v1 `osk_` Bearer surface (spawn → status → tokens → spec-kit → spawn-log). The dashboard `sk_live_` surface - SSE streaming chat (v1.2.5), managed agent restart (v1.2.6), and the v1.3.0 unified server event stream (`/servers/:id/events`, `/requests/:request_id`) - is intentionally not wrapped. SSE is browser-native via `EventSource`, and the request-receipt endpoints are tiny GET pairs. See `docs/SPAWN-API.md` for reference clients of both surfaces.
+
+**v1.3.1 (2026-05-08)** adds `getSpawnLog()` for self-serve diagnosis of wedge episodes — pulls the per-order NDJSON event log (provision steps, heartbeats, `agent_wedged` flips, auto-restart attempts, `agent_recovered`/`agent_escalation_required`). Type definitions for `chat_responsive`, `auto_restart_attempts`, `auto_restart_status`, `last_auto_restart_attempt_at`, `agent_last_frame_at` are emitted. **Integrator guidance:** gate `canChat` on `chat_responsive !== false` (treat `null` as unknown-OK) — catches the daemon-alive-but-chat-wedged failure mode that pure heartbeat-based gating misses.
 
 ## Install
 
@@ -22,7 +24,7 @@ const client = new OsmodaClient();
 // Free: list plans.
 const { plans, regions } = await client.listPlans();
 
-// Spawn (x402-gated — wrap fetch yourself, e.g. with @x402/fetch):
+// Spawn (x402-gated - wrap fetch yourself, e.g. with @x402/fetch):
 const paidClient = new OsmodaClient({
   fetcher: withPayment(fetch, { wallet }),
 });
@@ -37,7 +39,7 @@ const spawn = await paidClient.spawn("starter", {
     { label: "Fallback API",  provider: "anthropic", type: "api_key", secret: "sk-ant-api03-…" },
   ],
 }, {
-  idempotencyKey,                          // safe to retry — same key returns same server
+  idempotencyKey,                          // safe to retry - same key returns same server
 });
 
 const bearerClient = new OsmodaClient({ bearer: spawn.api_token });
@@ -65,7 +67,7 @@ The agent card at `/.well-known/agent-card.json` is the source of truth:
 ## Polling install progress
 
 Every full-status response carries `provision_steps[]` with phase-by-phase
-detail — drive an install-progress UI directly from it:
+detail - drive an install-progress UI directly from it:
 
 ```ts
 const s = await bearerClient.statusFull(orderId);
@@ -75,7 +77,7 @@ for (const step of s.provision_steps ?? []) {
 ```
 
 `waitForRunning` already throws an `OsmodaApiError` on `install_failed` with
-`install_error` surfaced in `error.detail` — including `log_tail` when an
+`install_error` surfaced in `error.detail` - including `log_tail` when an
 explicit `/api/provision-failed` callback fired.
 
 ## Error handling
@@ -116,7 +118,7 @@ await client.revokeToken(tokenId); // 204, token is dead
 ## WebSocket
 
 The chat endpoint is a plain WebSocket at
-`wss://spawn.os.moda/api/v1/chat/{orderId}?token=osk_...` — use the runtime's
+`wss://spawn.os.moda/api/v1/chat/{orderId}?token=osk_...` - use the runtime's
 `WebSocket` (browser or `ws` on Node). This SDK intentionally does not wrap it,
 to avoid pulling `ws` into your bundle.
 
@@ -146,7 +148,7 @@ in the `x-websocket` extension at the bottom of `/api/v1/docs`. See also
 ## Relationship to the OpenAPI spec
 
 This SDK is handwritten to match `GET /api/v1/docs`. It is **not** generated
-— by design. It serves as a compile-time regression check: if the runtime
+- by design. It serves as a compile-time regression check: if the runtime
 drifts from the types here, the OpenAPI spec is wrong and must be fixed to
 match reality.
 

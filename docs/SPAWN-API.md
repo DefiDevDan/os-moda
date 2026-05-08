@@ -1,27 +1,56 @@
-# Spawn API v1 — x402-Gated Public API
+# Spawn API v1 - x402-Gated Public API
 
-Last updated: 2026-05-06 · API version: **1.2.7**
+Last updated: 2026-05-08 · API version: **1.3.1**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
 
-**v1.2.7 (2026-05-06) — Bulletproof PAM-expiry fix + Hetzner reset-password fallback:**
+**v1.3.1 (2026-05-08) - Wedge-detection hardening + self-serve observability:**
 
-Three independent layers of defense so the failure mode that wedged a real customer agent (Hetzner Ubuntu PAM password-expiry blocking SSH session setup → unrecoverable without delete + respawn) cannot happen again. **No new public endpoints** — this is operational hardening + a self-healing recovery path that's transparent to integrators. New agent-card capability flags advertise the protection: `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`.
+Driven by an integrator bug report (order `1d64ce04`): a wedged-agent state where heartbeats kept landing (daemon alive) but the chat-agent was silent, the v1.2.7 wedge detector never fired (heartbeat-only signal), and the auto-restart was one-shot (one SSH failure → wedged forever). Three additive layers:
 
-- **Layer 1 — install.sh hardening** (cloud-init layer). Adds an `osmoda-pam-self-heal.service` systemd unit that runs at every boot, before sshd starts. The unit re-applies `passwd -d root && chage -d <today> -E -1 -I -1 -M 99999 root` *only if* PAM has flagged the password as expired. Idempotent. Survives any base-image regression.
-- **Layer 2 — `sshExec()` auto-recovery** (spawn-server layer). When a spawn-side SSH operation fails with `Password change required but no TTY available`, the spawn server automatically: (a) calls Hetzner `POST /servers/:id/actions/reset_password` to mint a new root password, (b) waits 12 s for propagation, (c) `sshpass`-logs in with the new password, (d) runs the same `chage` fix the install.sh self-heal would have run, (e) `passwd -l root` to re-lock password auth, (f) retries the original SSH command. Any SSH-dependent operation (file browser, agent restart, api-key delivery) now self-heals on legacy stuck spawns. Returns `recovery_attempted: true, recovery_method: "reset_password"` in the result envelope so dashboards can surface "we auto-recovered your server" in real time.
-- **Layer 3 — Wedged-server detector** (watchdog layer). New 60 s loop: any order with `status: "running"` AND `setup_complete: true` AND `last_heartbeat` >5 min stale flips `agent_wedged: true` (now also a field on the dashboard server-list response). The detector auto-kicks the v1.2.6 `agent_restart` flow on the wedge transition — which itself uses Layer 2 if SSH is blocked. Outcome: most wedges self-heal in 30–60 s with **zero operator intervention**; the dashboard just shows a brief "agent wedged → recovered" status.
+- **`GET /api/v1/servers/:id/spawn-log`** (osk_ Bearer) - reseller mirror of the dashboard spawn-log surface. Returns the per-order NDJSON event log: provision steps, heartbeats, `agent_wedged` flips, every auto-restart attempt with attempt-number/status, `agent_recovered` or `agent_escalation_required` terminal events. Filter by `?since_ms`, `?level`, `?limit`. Use for self-diagnosis when chat returns `agent_silent` or `gateway_wedged`.
+- **`chat_responsive` field** on the server-list / spawn-log response. Decouples wedge detection from the heartbeat path: tracks the last frame received from the customer gateway WS, independent of the agentd heartbeat cron. **Integrator guidance:** gate `canChat` on `chat_responsive !== false` (treat `null` as unknown-OK). Catches the daemon-alive-but-chat-wedged failure mode that heartbeat-based gating misses. New companion fields: `agent_last_frame_at`.
+- **Retry-with-backoff auto-restart.** Was one-shot in v1.2.7; now retries 4 times across `0/5/10/30 min` backoff before emitting `agent.escalation_required` on the unified plane. New surfaces: `auto_restart_attempts: number`, `auto_restart_status: "restarting" | "ready" | "failed" | "timeout" | "exhausted"`, `last_auto_restart_attempt_at: ISO`. Counters reset on recovery. When `exhausted`, operator action required (`recommendation: "delete_and_respawn"`).
 
-**No client work required.** Existing integrators continue using `agent_responsive` from v1.2.6; the new `agent_wedged` field is additive. The v1.2.6 restart endpoint behavior is unchanged externally — internally it now benefits from Layer 2 auto-recovery.
+Also: **typed 503 codes** from `chat-async` — `gateway_wedged` (room exists, agent_wedged) vs `gateway_unreachable` (room exists, WS closed) vs `agent_disconnected` (no room) — each carrying `fallback_recommendation`. **Stale conversation auto-clear** after 6 min so a dead prior chat doesn't permanently 409-block future requests.
 
-**v1.2.6 (2026-05-06) — Managed agent restart + responsiveness probe:**
+**No breaking changes for v1.3.0 consumers.** All new fields are additive; the 503 code split is a soft break only for callers that string-match on the exact `agent_disconnected` literal (most route on HTTP status).
+
+---
+
+**v1.3.0 (2026-05-06) - Unified server event plane + universal request receipts:**
+
+Every async action across both the dashboard and reseller surfaces (chat message, agent restart, key delivery, future actions) now returns a typed `request_id` and emits typed lifecycle events on a per-server SSE stream. One subscription, all actions; cursor-resumable; same shape as v1.2.5 chat-stream.
+
+Six new endpoints land:
+
+- `GET /api/v1/servers/:id/events` (SSE, `osk_` Bearer) - reseller surface
+- `GET /api/v1/servers/:id/requests` + `/:request_id` - reseller history + single receipt
+- `GET /api/dashboard/servers/:id/events` (SSE, `sk_live_` or cookie) - dashboard surface
+- `GET /api/dashboard/servers/:id/requests` + `/:request_id` - dashboard history + single receipt
+
+Event types: `request.accepted/progress/completed/failed/superseded`, `state.changed`, `agent.wedged/healed`, `heartbeat.received`, `install.progress`. Common `failure.code` values: `agent_silent`, `no_credential`, `gateway_wedged`, `ssh_pam_expired`, `timeout`. Common `fallback_recommendation`: `add_api_key`, `restart_agent`, `wait_for_wedge_auto_restart`, `delete_and_respawn`, `retry`.
+
+Existing per-action endpoints (`/agents/:agent/restart/:rid`, `/api-key`) keep working but now also produce `request_id` so consumers can migrate gradually. The dashboard chat UI ships rich live event bubbles instead of silent thinking dots. The `has_api_key` flag is now truthful — it reflects actual heartbeat-confirmed credential delivery, not just the chosen provider. New agent-card capability flags: `unified_event_stream:true`, `universal_request_receipts:true`, `truthful_has_api_key:true`.
+
+**v1.2.7 (2026-05-06) - Bulletproof PAM-expiry fix + cloud provider reset-password fallback:**
+
+Three independent layers of defense so the failure mode that wedged a real customer agent (cloud Ubuntu PAM password-expiry blocking SSH session setup → unrecoverable without delete + respawn) cannot happen again. **No new public endpoints** - this is operational hardening + a self-healing recovery path that's transparent to integrators. New agent-card capability flags advertise the protection: `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`.
+
+- **Layer 1 - install.sh hardening** (cloud-init layer). Adds an `osmoda-pam-self-heal.service` systemd unit that runs at every boot, before sshd starts. The unit re-applies `passwd -d root && chage -d <today> -E -1 -I -1 -M 99999 root` *only if* PAM has flagged the password as expired. Idempotent. Survives any base-image regression.
+- **Layer 2 - `sshExec()` auto-recovery** (spawn-server layer). When a spawn-side SSH operation fails with `Password change required but no TTY available`, the spawn server automatically: (a) calls cloud provider `POST /servers/:id/actions/reset_password` to mint a new root password, (b) waits 12 s for propagation, (c) `sshpass`-logs in with the new password, (d) runs the same `chage` fix the install.sh self-heal would have run, (e) `passwd -l root` to re-lock password auth, (f) retries the original SSH command. Any SSH-dependent operation (file browser, agent restart, api-key delivery) now self-heals on legacy stuck spawns. Returns `recovery_attempted: true, recovery_method: "reset_password"` in the result envelope so dashboards can surface "we auto-recovered your server" in real time.
+- **Layer 3 - Wedged-server detector** (watchdog layer). New 60 s loop: any order with `status: "running"` AND `setup_complete: true` AND `last_heartbeat` >5 min stale flips `agent_wedged: true` (now also a field on the dashboard server-list response). The detector auto-kicks the v1.2.6 `agent_restart` flow on the wedge transition - which itself uses Layer 2 if SSH is blocked. Outcome: most wedges self-heal in 30–60 s with **zero operator intervention**; the dashboard just shows a brief "agent wedged → recovered" status.
+
+**No client work required.** Existing integrators continue using `agent_responsive` from v1.2.6; the new `agent_wedged` field is additive. The v1.2.6 restart endpoint behavior is unchanged externally - internally it now benefits from Layer 2 auto-recovery.
+
+**v1.2.6 (2026-05-06) - Managed agent restart + responsiveness probe:**
 
 Two additive endpoints on the dashboard surface (`sk_live_` Bearer or session cookie auth) for the "agent process is alive but wedged" failure mode. Until now the only options were delete + respawn (loses chat history) or SSH yourself. This is self-service.
 
-- **`POST /api/dashboard/servers/:id/agents/:agent/restart`** — returns `202` immediately with `{restart_id, status:"restarting"}`. Background: SSH the box, run `systemctl restart osmoda-gateway`, poll for next heartbeat. If a restart is already in flight for that order+agent, returns the in-flight `restart_id` with `reused: true`.
-- **`GET /api/dashboard/servers/:id/agents/:agent/restart/:restart_id`** — polls the restart record. `status` ∈ `restarting` | `ready` | `timeout` | `failed`. On `failed`, the response includes a human-readable `error` and may include `fallback_recommendation: "delete_and_respawn"` (set when the failure is the Hetzner PAM password-expiry bug — see below).
-- **New `agent_responsive` field** on `GET /api/dashboard/servers` (list response): `true` iff a heartbeat landed within the last 90 seconds. Use this to surface "agent is unresponsive" *before* the user types and waits 120 s. Companion `last_responsive_at` is the heartbeat timestamp. **Zero token cost** — derived from existing heartbeats, not a probe prompt.
-- **install.sh patched** — `chage -d $(date +%Y-%m-%d)` now runs alongside the existing password-expiry fix, so future spawns can't trap themselves the way the only known stuck server in the wild did. Legacy spawns where this PAM bug already triggered need delete + respawn — the restart endpoint surfaces that recommendation explicitly when it can't SSH.
+- **`POST /api/dashboard/servers/:id/agents/:agent/restart`** - returns `202` immediately with `{restart_id, status:"restarting"}`. Background: SSH the box, run `systemctl restart osmoda-gateway`, poll for next heartbeat. If a restart is already in flight for that order+agent, returns the in-flight `restart_id` with `reused: true`.
+- **`GET /api/dashboard/servers/:id/agents/:agent/restart/:restart_id`** - polls the restart record. `status` ∈ `restarting` | `ready` | `timeout` | `failed`. On `failed`, the response includes a human-readable `error` and may include `fallback_recommendation: "delete_and_respawn"` (set when the failure is the cloud provider PAM password-expiry bug - see below).
+- **New `agent_responsive` field** on `GET /api/dashboard/servers` (list response): `true` iff a heartbeat landed within the last 90 seconds. Use this to surface "agent is unresponsive" *before* the user types and waits 120 s. Companion `last_responsive_at` is the heartbeat timestamp. **Zero token cost** - derived from existing heartbeats, not a probe prompt.
+- **install.sh patched** - `chage -d $(date +%Y-%m-%d)` now runs alongside the existing password-expiry fix, so future spawns can't trap themselves the way the only known stuck server in the wild did. Legacy spawns where this PAM bug already triggered need delete + respawn - the restart endpoint surfaces that recommendation explicitly when it can't SSH.
 
 Reference integration:
 ```ts
@@ -46,20 +75,20 @@ async function restartAgent(orderId, agentId) {
 }
 ```
 
-**v1.2.5 (2026-05-06) — SSE-based async chat with resumable streaming:**
+**v1.2.5 (2026-05-06) - SSE-based async chat with resumable streaming:**
 
-Three additive endpoints on the dashboard surface (`sk_live_` Bearer or session cookie auth — distinct from the v1 `osk_` Bearer used by the rest of this API). The legacy synchronous `POST /chat` stays for compatibility.
+Three additive endpoints on the dashboard surface (`sk_live_` Bearer or session cookie auth - distinct from the v1 `osk_` Bearer used by the rest of this API). The legacy synchronous `POST /chat` stays for compatibility.
 
-- **`POST /api/dashboard/servers/:id/chat-async`** — body `{message, model?}`. Returns `202` immediately with `{conversation_id, message_id}`. The agent runs in the background; clients consume events via the next two endpoints.
-- **`GET /api/dashboard/servers/:id/chat-stream/:conversation_id?cursor=N`** — `text/event-stream`. Replays every `ChatEvent` with `id > cursor` from the persistent NDJSON log, then attaches live for new events. Closes with `event: close` when the conversation reaches a terminal event (`done` or `error`). 15 s keepalive comments so Cloudflare/nginx don't cut idle streams. Cursor past terminal returns `410 conversation_terminated`.
-- **`GET /api/dashboard/servers/:id/chat-history/:conversation_id`** — full event log as JSON. For cold loads (refresh hours later) and non-SSE clients.
+- **`POST /api/dashboard/servers/:id/chat-async`** - body `{message, model?}`. Returns `202` immediately with `{conversation_id, message_id}`. The agent runs in the background; clients consume events via the next two endpoints.
+- **`GET /api/dashboard/servers/:id/chat-stream/:conversation_id?cursor=N`** - `text/event-stream`. Replays every `ChatEvent` with `id > cursor` from the persistent NDJSON log, then attaches live for new events. Closes with `event: close` when the conversation reaches a terminal event (`done` or `error`). 15 s keepalive comments so Cloudflare/nginx don't cut idle streams. Cursor past terminal returns `410 conversation_terminated`.
+- **`GET /api/dashboard/servers/:id/chat-history/:conversation_id`** - full event log as JSON. For cold loads (refresh hours later) and non-SSE clients.
 - **`ChatEvent` envelope** (discriminated by `type`):
-  - `phase` — `{phase: "thinking" | "answering"}`
-  - `tool_call_start` — `{tool, args_preview}`
-  - `tool_call_done` — `{tool, result_preview, ok, duration_ms}`
-  - `delta` — `{text}` (an assistant token chunk)
-  - `done` — `{final_text, tokens_in?, tokens_out?}` (terminal)
-  - `error` — `{code, message}` (terminal — e.g. `code:"agent_silent"` when the model never streamed within 120 s)
+  - `phase` - `{phase: "thinking" | "answering"}`
+  - `tool_call_start` - `{tool, args_preview}`
+  - `tool_call_done` - `{tool, result_preview, ok, duration_ms}`
+  - `delta` - `{text}` (an assistant token chunk)
+  - `done` - `{final_text, tokens_in?, tokens_out?}` (terminal)
+  - `error` - `{code, message}` (terminal - e.g. `code:"agent_silent"` when the model never streamed within 120 s)
 - **Persistence**: append-only NDJSON at `data/chat-events/<conversation_id>.ndjson`. Retention ≥ 24 h after terminal (default sweep 48 h). The NDJSON file is the source of truth for both live and cold replay.
 - **Concurrency**: only one chat-async can be in flight per server (single-user-watching-single-agent assumption). A second concurrent request returns `409 conversation_in_progress`.
 - **Out of scope for v1.2.5**: cancelling an in-flight agent, multi-turn parallelism on a single conversation, WebSocket parity for dashboard auth.
@@ -90,38 +119,38 @@ es.addEventListener("chat", (ev) => {
 es.addEventListener("close", () => es.close());
 ```
 
-**v1.2.3 (2026-05-04 / 2026-05-06) — Swarms retired + smart watchdog + spawn-log:**
-- Removed the `Swarms (alpha)` family (`/api/v1/swarms/*`, 16 paths + 2 WS feeds). The same outcome — coordinated autonomous AI businesses — is now delivered by spawning a server, opening the chat WebSocket, and prompting the agent: every spawn ships with full system access plus the **Factories** (spec-kit) surface. The fictional Venture-orchestrator simulator is gone; ~2300 LOC retired.
-- **Smart 3-layer watchdog** (2026-05-06): the install monitor now runs every 60 s with three escalating detection layers: `cloud_init_silent` at 4 min (no callbacks at all), `phase_stalled` at 7 min (same phase no progress — auto SSH-tails the box and attaches the install-log tail to `install_error.log_tail`), `final_timeout` at 25 min (hard fail, existing).
-- **New `stalled` field on `StatusResponseFull`** — soft-warning state surfaced when a spawn is mid-stall but not yet hard-failed. Lets your dashboard show "we noticed it's slow, investigating…" instead of a frozen spinner. `{step, status, stuck_for_min, since}`. Cleared automatically when the next phase reports progress.
-- **Per-order spawn-log** (NDJSON) at `data/spawn-log/<order_id>.ndjson` — every lifecycle event timestamped + structured. Surfaced via `GET /api/dashboard/orders/{id}/spawn-log` (cookie-authed dashboard endpoint, owner-only) for the human-facing "what's happening with my spawn" panel. Not part of the v1 Bearer API surface — AI integrators get the same info from `provision_steps[]` + `install_error` + `stalled` in the status response.
+**v1.2.3 (2026-05-04 / 2026-05-06) - Swarms retired + smart watchdog + spawn-log:**
+- Removed the `Swarms (alpha)` family (`/api/v1/swarms/*`, 16 paths + 2 WS feeds). The same outcome - coordinated autonomous AI businesses - is now delivered by spawning a server, opening the chat WebSocket, and prompting the agent: every spawn ships with full system access plus the **Factories** (spec-kit) surface. The fictional Venture-orchestrator simulator is gone; ~2300 LOC retired.
+- **Smart 3-layer watchdog** (2026-05-06): the install monitor now runs every 60 s with three escalating detection layers: `cloud_init_silent` at 4 min (no callbacks at all), `phase_stalled` at 7 min (same phase no progress - auto SSH-tails the box and attaches the install-log tail to `install_error.log_tail`), `final_timeout` at 25 min (hard fail, existing).
+- **New `stalled` field on `StatusResponseFull`** - soft-warning state surfaced when a spawn is mid-stall but not yet hard-failed. Lets your dashboard show "we noticed it's slow, investigating…" instead of a frozen spinner. `{step, status, stuck_for_min, since}`. Cleared automatically when the next phase reports progress.
+- **Per-order spawn-log** (NDJSON) at `data/spawn-log/<order_id>.ndjson` - every lifecycle event timestamped + structured. Surfaced via `GET /api/dashboard/orders/{id}/spawn-log` (cookie-authed dashboard endpoint, owner-only) for the human-facing "what's happening with my spawn" panel. Not part of the v1 Bearer API surface - AI integrators get the same info from `provision_steps[]` + `install_error` + `stalled` in the status response.
 - No impact on stable v1 endpoints (`/plans`, `/spawn/:planId`, `/status/:orderId`, `/tokens/:token_id`, `/spec-kit/projects`, `/chat/{orderId}`, `/docs`, `/.well-known/agent-card.json`).
 
-**v1.2.2 (2026-04-30) — spec-driven development + auth-type gating:**
-- New free endpoint `GET /api/v1/spec-kit/projects` (Bearer) — discover spec-driven projects across the caller's spawned servers. Aggregated from heartbeat data; no SSH required.
+**v1.2.2 (2026-04-30) - spec-driven development + auth-type gating:**
+- New free endpoint `GET /api/v1/spec-kit/projects` (Bearer) - discover spec-driven projects across the caller's spawned servers. Aggregated from heartbeat data; no SSH required.
 - Every spawn now ships with `github/spec-kit` baked in (uv + specify-cli, pinned `v0.8.4`). The agent gets two new MCP tools (`spec_kit_init` + `spec_kit_run`) that scaffold spec-kit projects on demand. Bumped to **92 MCP tools / 20 system skills**.
 - Agent Card gained capability flags: `spec_driven_development`, `spec_kit_version`, plus pre-existing `install_failure_visibility`, `install_watchdog_minutes`, `provision_progress_callbacks`, `network_mode`.
-- Agent Card `runtimes[].supported_auth_types` — `claude-code` accepts both `oauth` + `api_key`; `openclaw` accepts `api_key` only. The dashboard Engine tab and SDK both enforce this contract client-side; the customer-server gateway enforces server-side.
+- Agent Card `runtimes[].supported_auth_types` - `claude-code` accepts both `oauth` + `api_key`; `openclaw` accepts `api_key` only. The dashboard Engine tab and SDK both enforce this contract client-side; the customer-server gateway enforces server-side.
 - `claude-opus-4-7` is now a default model for the `claude-code` runtime (newest Anthropic Opus). Selectable from the dashboard Engine tab and via the spawn `default_model` field.
-- The "(legacy)" suffix on OpenClaw was removed everywhere — it's a first-class engine for BYOK / non-Anthropic providers.
+- The "(legacy)" suffix on OpenClaw was removed everywhere - it's a first-class engine for BYOK / non-Anthropic providers.
 
-**v1.2.1 (2026-04-29) — install-failure visibility pass:**
+**v1.2.1 (2026-04-29) - install-failure visibility pass:**
 - New order statuses: `install_failed` (watchdog or explicit callback) and `deleted`.
 - New `install_error` field on full status response when `status=install_failed`. Carries `step`, `reason`, optional `log_tail` (200 lines), `at`, and `watchdog` boolean.
 - New `provision_steps[]` field surfaces every install phase transition.
-- Server-side callbacks `/api/heartbeat`, `/api/provision-progress`, `/api/provision-failed` documented in OpenAPI for self-hosted operators (NOT for API integrators — the spawned server posts these to its own callback URL).
+- Server-side callbacks `/api/heartbeat`, `/api/provision-progress`, `/api/provision-failed` documented in OpenAPI for self-hosted operators (NOT for API integrators - the spawned server posts these to its own callback URL).
 
-**v1.2.0 (2026-04-18):** modular runtime — `runtime`, `default_model`, `credentials[]` fields on spawn requests; per-server dashboard config endpoints.
+**v1.2.0 (2026-04-18):** modular runtime - `runtime`, `default_model`, `credentials[]` fields on spawn requests; per-server dashboard config endpoints.
 
-**v1.1.0 (2026-04-17) — production readiness:** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec.
+**v1.1.0 (2026-04-17) - production readiness:** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec.
 
-**Live, interactive reference**: <https://spawn.os.moda/docs> (Swagger UI bound to `/api/v1/docs` — auto-current with the deployed server). The spec ships concrete `example` values on every schema and multi-case `examples` on the most-polled operations (status, spec-kit projects, agent-card).
+**Live, interactive reference**: <https://spawn.os.moda/docs> (Swagger UI bound to `/api/v1/docs` - auto-current with the deployed server). The spec ships concrete `example` values on every schema and multi-case `examples` on the most-polled operations (status, spec-kit projects, agent-card).
 
-**What v1 does NOT expose** — call out for integrators planning their dashboards:
-- **Server termination via Bearer** — currently dashboard-only at `/api/dashboard/servers/:id` (cookie auth). Integrators should retire the token (`DELETE /api/v1/tokens/{id}`) and ask end-users to delete via the dashboard.
-- **Post-spawn agent/credential config via Bearer** — the `/config/*` proxy endpoints are cookie-authed (SSH-tunnelled). Pre-seed `credentials[]` + `runtime` + `default_model` at spawn time instead.
-- **Webhooks** — poll `GET /api/v1/status/{orderId}`. Drive sub-status progress UIs from the `provision_steps[]` field.
-- **Listing all servers a token owns** — tokens are scoped to a single order. Hold the `order_id` returned by spawn alongside the token.
+**What v1 does NOT expose** - call out for integrators planning their dashboards:
+- **Server termination via Bearer** - currently dashboard-only at `/api/dashboard/servers/:id` (cookie auth). Integrators should retire the token (`DELETE /api/v1/tokens/{id}`) and ask end-users to delete via the dashboard.
+- **Post-spawn agent/credential config via Bearer** - the `/config/*` proxy endpoints are cookie-authed (SSH-tunnelled). Pre-seed `credentials[]` + `runtime` + `default_model` at spawn time instead.
+- **Webhooks** - poll `GET /api/v1/status/{orderId}`. Drive sub-status progress UIs from the `provision_steps[]` field.
+- **Listing all servers a token owns** - tokens are scoped to a single order. Hold the `order_id` returned by spawn alongside the token.
 
 ---
 
@@ -175,8 +204,8 @@ Server ← 200 OK + server details
 ```
 
 **Supported networks**:
-- **Base (EVM)** — USDC on Base mainnet (chain ID 8453) or Base Sepolia testnet
-- **Solana (SVM)** — USDC on Solana mainnet-beta or Devnet
+- **Base (EVM)** - USDC on Base mainnet (chain ID 8453) or Base Sepolia testnet
+- **Solana (SVM)** - USDC on Solana mainnet-beta or Devnet
 
 The 402 response advertises both networks. Your x402 client picks whichever chain it has funds on.
 
@@ -252,7 +281,7 @@ curl -X DELETE \
 
 Check server provisioning status.
 
-**Without auth** — basic info only:
+**Without auth** - basic info only:
 ```json
 {
   "order_id": "uuid",
@@ -262,7 +291,7 @@ Check server provisioning status.
 }
 ```
 
-**With `Authorization: Bearer osk_<token>`** — full details. Three concrete cases (live in `/docs` as named examples):
+**With `Authorization: Bearer osk_<token>`** - full details. Three concrete cases (live in `/docs` as named examples):
 
 *Running:*
 ```json
@@ -317,7 +346,7 @@ Check server provisioning status.
 
 #### `GET /api/v1/spec-kit/projects` *(v1.2.2)*
 
-List spec-driven projects across the caller's spawned servers. **Bearer required** (`osk_<hex>`). Aggregated from each server's most recent heartbeat — no SSH required.
+List spec-driven projects across the caller's spawned servers. **Bearer required** (`osk_<hex>`). Aggregated from each server's most recent heartbeat - no SSH required.
 
 ```bash
 curl -H "Authorization: Bearer osk_…" \
@@ -360,19 +389,19 @@ A2A / ERC-8004 agent discovery card. Returns all plans as skills with x402 prici
 
 All spawn endpoints require x402 USDC payment. Without a valid `PAYMENT` header, the server returns `402 Payment Required` with payment details.
 
-#### `POST /api/v1/spawn/test` — Solo ($14.99/mo)
+#### `POST /api/v1/spawn/test` - Solo ($14.99/mo)
 
 2 vCPU, 4GB RAM, 40GB SSD. 1 agent, light tasks.
 
-#### `POST /api/v1/spawn/starter` — Pro ($34.99/mo)
+#### `POST /api/v1/spawn/starter` - Pro ($34.99/mo)
 
 4 vCPU, 8GB RAM, 80GB SSD. 2-4 agents, real work.
 
-#### `POST /api/v1/spawn/developer` — Team ($62.99/mo)
+#### `POST /api/v1/spawn/developer` - Team ($62.99/mo)
 
 8 vCPU, 16GB RAM, 160GB SSD. 5-10 agents, heavy loads.
 
-#### `POST /api/v1/spawn/production` — Scale ($125.99/mo)
+#### `POST /api/v1/spawn/production` - Scale ($125.99/mo)
 
 16 vCPU, 32GB RAM, 320GB SSD. 10-20+ agents, full fleet.
 
@@ -466,7 +495,7 @@ Real-time chat with the spawned server's AI agent.
 | 1000 | Normal close |
 | 4001 | Unauthorized (missing / malformed token) |
 | 4003 | Idle timeout |
-| 4008 | (reserved for concurrency — today concurrency is rejected pre-upgrade via 429) |
+| 4008 | (reserved for concurrency - today concurrency is rejected pre-upgrade via 429) |
 
 ---
 
@@ -476,12 +505,12 @@ Every status response carries `status`. Possible values:
 
 | `status` | Meaning | Set by |
 |---|---|---|
-| `pending` | Order created but server not yet provisioned (e.g. payment in flight) | spawn endpoint pre-Hetzner |
-| `provisioning` | Hetzner returned the box; cloud-init + install.sh running | spawn endpoint post-Hetzner |
+| `pending` | Order created but server not yet provisioned (e.g. payment in flight) | spawn endpoint pre-cloud provider |
+| `provisioning` | cloud provider returned the box; cloud-init + install.sh running | spawn endpoint post-cloud provider |
 | `running` | Server up + at least one heartbeat received → setup complete | first heartbeat from spawned server |
 | `install_failed` | Install died OR no heartbeat in 25 min | `/api/provision-failed` callback OR install-watchdog cron |
-| `failed` | Pre-Hetzner failure (e.g. quota, regional outage) | spawn endpoint on Hetzner error |
-| `deleted` | Server deleted (operator action OR Hetzner-side gone OR refunded order) | DELETE `/api/dashboard/servers/:id` OR cleanup script |
+| `failed` | Pre-cloud provider failure (e.g. quota, regional outage) | spawn endpoint on cloud provider error |
+| `deleted` | Server deleted (operator action OR cloud provider-side gone OR refunded order) | DELETE `/api/dashboard/servers/:id` OR cleanup script |
 
 **When `status=install_failed`**, the full status response also carries an `install_error` object:
 
@@ -507,7 +536,7 @@ These three endpoints are called BY the spawned server (`install.sh` / `agentd` 
 |---|---|---|---|
 | `POST /api/heartbeat` | `agentd` on the spawned server, every 60s | `X-Heartbeat-Secret` header (per-order secret minted at spawn) | Health + agent count + daemon state. Triggers status flip from `provisioning` → `running` on first call. |
 | `POST /api/provision-progress` | `install.sh` at every phase transition | same | Records into `provision_steps[]` for the dashboard install-progress UI. `status="error"` flips order to `install_failed`. |
-| `POST /api/provision-failed` | `install.sh`'s EXIT trap on fatal failure | same | Carries `step` + `reason` + `log_tail` (200 lines). Order flips to `install_failed` with full diagnostic context. Won't fire on kernel-SIGKILL failures (e.g. nixos-infect mid-reboot) — for that class, the spawn-side install-watchdog cron flags the order at the 25-min mark instead. |
+| `POST /api/provision-failed` | `install.sh`'s EXIT trap on fatal failure | same | Carries `step` + `reason` + `log_tail` (200 lines). Order flips to `install_failed` with full diagnostic context. Won't fire on kernel-SIGKILL failures (e.g. nixos-infect mid-reboot) - for that class, the spawn-side install-watchdog cron flags the order at the 25-min mark instead. |
 
 **Watchdog**: an internal cron on spawn flags any order where `status=running, no heartbeat ever, age > 25 min` as `install_failed` with `install_error.watchdog=true, step=no_callback`. This ensures customers never sit in eternal "Installing..." even if both `install.sh` callbacks fail.
 
@@ -519,21 +548,21 @@ Full schemas in the [OpenAPI spec](https://spawn.os.moda/api/v1/docs).
 
 The v1 API uses **two auth mechanisms**:
 
-1. **x402 payment** — for spawn endpoints. The `@x402/express` middleware handles this automatically. You pay once per spawn, and the facilitator settles on-chain.
+1. **x402 payment** - for spawn endpoints. The `@x402/express` middleware handles this automatically. You pay once per spawn, and the facilitator settles on-chain.
 
-2. **Bearer token** — for post-spawn operations. The `osk_` token returned in the spawn response authenticates status checks, token management, and WebSocket connections.
+2. **Bearer token** - for post-spawn operations. The `osk_` token returned in the spawn response authenticates status checks, token management, and WebSocket connections.
 
 No API keys. No accounts. No sessions. No cookies. Pay and go.
 
 ### Token lifecycle
 
-Every `osk_` token has metadata: `token_id`, `created_at`, `expires_at` (default 1 year), and `revoked_at`. The `token_id` is the first 16 hex chars of the token's SHA-256 hash — safe to log.
+Every `osk_` token has metadata: `token_id`, `created_at`, `expires_at` (default 1 year), and `revoked_at`. The `token_id` is the first 16 hex chars of the token's SHA-256 hash - safe to log.
 
 - **Inspect**: `GET /api/v1/tokens/:token_id` with the token as Bearer. Returns metadata; only the token itself can read its own metadata.
 - **Revoke**: `DELETE /api/v1/tokens/:token_id` with the token as Bearer. Returns `204`; subsequent calls with the revoked token return `401 token_revoked`.
 - Expired tokens return `401 token_expired`.
 
-Legacy tokens issued before v1.1.0 are lazily assigned a 1-year expiry on first use — no action required.
+Legacy tokens issued before v1.1.0 are lazily assigned a 1-year expiry on first use - no action required.
 
 ---
 
@@ -558,7 +587,7 @@ curl -X POST https://spawn.os.moda/api/v1/spawn/starter \
 
 ## Request IDs
 
-Every response — success or error — carries `X-Request-Id: req_<ulid>`. The same ID appears in server logs for any given request. Include it when asking for support.
+Every response - success or error - carries `X-Request-Id: req_<ulid>`. The same ID appears in server logs for any given request. Include it when asking for support.
 
 You can also **send** `X-Request-Id` on a request; if it matches `[A-Za-z0-9_-]{8,64}` the server echoes it back instead of generating one.
 
@@ -592,11 +621,11 @@ Every error returns the same envelope:
 }
 ```
 
-- `code` — machine-readable, stable. Match against this field.
-- `message` — human-readable, may change wording between releases.
-- `detail` — optional endpoint-specific diagnostic fields.
-- `request_id` — echoes the `X-Request-Id` response header.
-- `error` — **legacy alias for `code`**, kept for one release for older clients. New integrations should read `code`.
+- `code` - machine-readable, stable. Match against this field.
+- `message` - human-readable, may change wording between releases.
+- `detail` - optional endpoint-specific diagnostic fields.
+- `request_id` - echoes the `X-Request-Id` response header.
+- `error` - **legacy alias for `code`**, kept for one release for older clients. New integrations should read `code`.
 
 ### Canonical error codes
 
@@ -612,10 +641,10 @@ Every error returns the same envelope:
 | `token_revoked` | 401 | `revoked_at` set |
 | `forbidden` | 403 | valid token, wrong resource |
 | `rate_limited` | 429 | includes `Retry-After` |
-| `provisioning_failed` | 500 | Hetzner/cloud-init error (detail has reason) |
+| `provisioning_failed` | 500 | cloud provider/cloud-init error (detail has reason) |
 | `internal_error` | 500 | anything unexpected |
-| `service_unavailable` | 503 | x402 middleware offline, HETZNER_TOKEN missing |
-| Payment-required envelope | 402 | x402 — `{x402Version, error, accepts[]}`, not the Error shape above |
+| `service_unavailable` | 503 | x402 middleware offline, or cloud-provider API token missing |
+| Payment-required envelope | 402 | x402 - `{x402Version, error, accepts[]}`, not the Error shape above |
 
 ### HTTP status summary
 
@@ -623,11 +652,11 @@ Every error returns the same envelope:
 |--------|---------|
 | 400 | Validation failed |
 | 401 | Missing / expired / revoked token |
-| 402 | Payment required (x402 — payment requirements in body) |
+| 402 | Payment required (x402 - payment requirements in body) |
 | 403 | Valid token, wrong resource |
 | 404 | Order or plan not found |
 | 409 | Idempotency-Key reused with different body |
-| 429 | Rate limited — honor `Retry-After` |
+| 429 | Rate limited - honor `Retry-After` |
 | 500 | Server error (provisioning failed, internal error) |
 | 503 | Service unavailable (payment system not active, provisioner offline) |
 
@@ -642,12 +671,12 @@ The simplest way to interact with the API from an agent:
 ```typescript
 import { withPayment } from "@x402/fetch";
 
-// Wrap fetch with x402 — handles 402 automatically
+// Wrap fetch with x402 - handles 402 automatically
 const fetch402 = withPayment(fetch, {
   wallet: yourWallet,  // viem wallet client with USDC approval
 });
 
-// Spawn a server — payment is automatic
+// Spawn a server - payment is automatic
 const res = await fetch402("https://spawn.os.moda/api/v1/spawn/test", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -721,7 +750,7 @@ ws.on("message", (data) => {
 | `SOL_WALLET` | Yes* | Solana (SVM) receiving wallet address for USDC payments |
 | `NETWORK_MODE` | No | `testnet` (default) or `mainnet` |
 | `X402_FACILITATOR_URL` | No | Custom facilitator URL (defaults based on NETWORK_MODE) |
-| `HETZNER_TOKEN` | Yes | Hetzner Cloud API token for server provisioning |
+| `HETZNER_TOKEN` | Yes | cloud-provider API token for server provisioning (env var name preserved for compatibility; can target any compatible cloud API) |
 
 *At least one of `ETH_WALLET` or `SOL_WALLET` is required. Both can be set for dual-chain support.
 
@@ -782,14 +811,14 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
       "display_name": "OpenClaw",
       "supported_auth_types": ["api_key"],
       "default_models": ["claude-sonnet-4-6"],
-      "description": "OpenClaw multi-runtime CLI (BYOK). API key only — does not accept OAuth."
+      "description": "OpenClaw multi-runtime CLI (BYOK). API key only - does not accept OAuth."
     }
   ],
   "skills": [
     {
       "id": "spawn-test",
       "name": "Spawn Solo Server",
-      "description": "1 agent, light tasks — 2 vCPU, 4GB RAM, 40GB SSD",
+      "description": "1 agent, light tasks - 2 vCPU, 4GB RAM, 40GB SSD",
       "endpoint": "https://spawn.os.moda/api/v1/spawn/test",
       "method": "POST",
       "price": {
@@ -855,8 +884,8 @@ The agent card at the well-known URL enables automatic discovery by any Daydream
 ## Security notes
 
 - **API tokens**: Generated with `crypto.randomBytes(32)`. Stored as SHA-256 hash (never raw). Shown once at spawn time. 1-year default TTL (`TOKEN_DEFAULT_TTL_DAYS`). Revocable via `DELETE /api/v1/tokens/:token_id`.
-- **Token metadata store**: `apps/spawn/data/tokens.enc` — AES-256-GCM, same pattern as orders/sessions.
-- **Token ID**: first 16 hex chars of the SHA-256 token hash — safe to log, used as the public identifier in the `/tokens/:token_id` URL.
+- **Token metadata store**: `apps/spawn/data/tokens.enc` - AES-256-GCM, same pattern as orders/sessions.
+- **Token ID**: first 16 hex chars of the SHA-256 token hash - safe to log, used as the public identifier in the `/tokens/:token_id` URL.
 - **Token comparison**: Timing-safe (`crypto.timingSafeEqual` on hashes).
 - **Rate limiting**: Per-IP floor on every endpoint; per-token quotas on spawn (10/h) and status (120/min) when `Bearer osk_…` is present.
 - **WebSocket hardening**: 30 s heartbeat, 10 min idle close, enforced backpressure (drops frames to paused clients), 3-session cap per token.

@@ -155,6 +155,63 @@ export interface StalledState {
   since: string;
 }
 
+// ── Spawn-log (v1.3.1) ──────────────────────────────────────────────────────
+
+/** v1.3.1 — single NDJSON event entry from the spawn-log surface. */
+export interface SpawnLogEvent {
+  ts: string;
+  level: "info" | "warn" | "error";
+  /** Stable code — `provision_start`, `install_failed`, `first_heartbeat`,
+   *  `setup_complete`, `agent_wedged`, `agent_recovered`,
+   *  `agent_escalation_required`, etc. */
+  code: string;
+  message: string;
+  detail?: Record<string, unknown> | null;
+}
+
+/** v1.3.1 — status of the most recent auto-restart attempt. `exhausted`
+ *  means the wedge detector has used its full retry budget and operator
+ *  action is required (`delete_and_respawn` typically). */
+export type AutoRestartStatus =
+  | "restarting"
+  | "ready"
+  | "failed"
+  | "timeout"
+  | "exhausted";
+
+/** v1.3.1 — Response shape for `GET /api/v1/servers/:id/spawn-log`. */
+export interface SpawnLogResponse {
+  order_id: string;
+  server_name: string | null;
+  server_ip: string | null;
+  status: string;
+  setup_complete: boolean;
+  last_heartbeat: string | null;
+  /** True when the order is currently flagged as wedged. */
+  agent_wedged: boolean;
+  agent_wedged_since: string | null;
+  /** How many auto-restart attempts the wedge detector has fired since the
+   *  current wedge began (0–4). Resets on recovery. */
+  auto_restart_attempts: number;
+  auto_restart_status: AutoRestartStatus | null;
+  last_auto_restart_attempt_at: string | null;
+  events: SpawnLogEvent[];
+  events_count: number;
+  truncated: boolean;
+  /** Pass back as `?since_ms=N` for incremental polling. */
+  cursor_ms: number;
+}
+
+/** v1.3.1 — Filter options for `getSpawnLog()`. */
+export interface SpawnLogQuery {
+  /** Only events with `ts >= this unix-ms`. */
+  sinceMs?: number;
+  /** Levels to include. Default: all. */
+  level?: Array<"info" | "warn" | "error">;
+  /** 1–500. Default: 100. */
+  limit?: number;
+}
+
 export interface TokenMeta {
   token_id: string;
   order_id: string;
@@ -361,6 +418,28 @@ export class OsmodaClient {
       method: "DELETE",
       expect204: true,
     });
+  }
+
+  // ── Spawn-log (v1.3.1) ───────────────────────────────────────────────
+
+  /**
+   * Pull the per-order NDJSON event log: provision steps, heartbeats,
+   * `agent_wedged` flips, every auto-restart attempt with attempt-number /
+   * status, `agent_recovered` or `agent_escalation_required` terminal
+   * events. Use for self-diagnosis when chat returns `agent_silent` or
+   * `gateway_wedged` — pull `level: ["warn", "error"]` to see only failures.
+   *
+   * Bearer required (osk_, must own the order).
+   */
+  getSpawnLog(orderId: string, query: SpawnLogQuery = {}): Promise<SpawnLogResponse> {
+    if (!this.bearer) throw new Error("getSpawnLog requires bearer osk_ token");
+    const params = new URLSearchParams();
+    if (query.sinceMs != null) params.set("since_ms", String(query.sinceMs));
+    if (query.level?.length) params.set("level", query.level.join(","));
+    if (query.limit != null) params.set("limit", String(query.limit));
+    const qs = params.toString();
+    const path = `/api/v1/servers/${encodeURIComponent(orderId)}/spawn-log${qs ? `?${qs}` : ""}`;
+    return this.request<SpawnLogResponse>(path, { method: "GET" });
   }
 
   // ── Spec-kit (v1.2.2) ────────────────────────────────────────────────

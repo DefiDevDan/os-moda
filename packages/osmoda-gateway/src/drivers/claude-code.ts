@@ -97,6 +97,39 @@ export const claudeCodeDriver: RuntimeDriver = {
     const cwd = opts.workingDir || "/root";
     const env = buildEnv(opts.credential);
 
+    // Pre-flight: if cwd doesn't exist, child_process.spawn() returns ENOENT
+    // with a misleading "spawn <claude binary> ENOENT" message that points
+    // at the binary, not at the missing cwd. Catch this here so the chat
+    // gets a clear "workspace dir missing" error and the gateway doesn't
+    // crash on the unhandled error event.
+    try {
+      fs.accessSync(cwd, fs.constants.R_OK | fs.constants.X_OK);
+    } catch {
+      yield {
+        type: "error",
+        code: "workspace_missing",
+        text:
+          `Workspace directory '${cwd}' does not exist or isn't readable. ` +
+          `Create it on the customer box: 'mkdir -p ${cwd}' and restart osmoda-gateway. ` +
+          `(This is a known install.sh regression on pre-v1.3.1 spawns when runtime=claude-code.)`,
+      };
+      return;
+    }
+    // Pre-flight: claude binary executable?
+    try {
+      fs.accessSync(claude, fs.constants.X_OK);
+    } catch {
+      yield {
+        type: "error",
+        code: "claude_not_found",
+        text:
+          `Claude CLI not found or not executable at '${claude}'. ` +
+          `Reinstall: 'cd /opt/osmoda/packages/osmoda-gateway && npm install && ` +
+          `ln -sf node_modules/.bin/claude /usr/local/bin/claude'.`,
+      };
+      return;
+    }
+
     const args = [
       "-p",
       "--output-format", "stream-json",
@@ -118,6 +151,49 @@ export const claudeCodeDriver: RuntimeDriver = {
         type: "error",
         code: "spawn_failed",
         text: `Failed to spawn claude: ${e instanceof Error ? e.message : String(e)}`,
+      };
+      return;
+    }
+
+    // CRITICAL: child_process.spawn() does NOT throw synchronously for ENOENT
+    // (missing binary OR missing cwd). It returns a ChildProcess, then later
+    // emits an `error` event. With no listener attached, that error becomes
+    // an UNHANDLED 'error' event which kills the entire gateway process
+    // (Node default behavior). We attach a listener that turns it into a
+    // promise we can await alongside the readline loop, so the chat gets a
+    // structured error and the gateway stays alive.
+    let spawnError: Error | null = null;
+    let spawnErrorResolved = false;
+    const spawnErrorPromise = new Promise<void>((resolve) => {
+      proc.once("error", (e: NodeJS.ErrnoException) => {
+        spawnError = e;
+        spawnErrorResolved = true;
+        resolve();
+      });
+      // If proc exits cleanly without emitting `error`, free the listener
+      proc.once("exit", () => {
+        if (!spawnErrorResolved) {
+          spawnErrorResolved = true;
+          resolve();
+        }
+      });
+    });
+    // Race a tiny tick — if spawn instantly errors (ENOENT typically does),
+    // we catch it here before trying to read from a dead stdout.
+    await Promise.race([
+      spawnErrorPromise,
+      new Promise((r) => setImmediate(r)),
+    ]);
+    if (spawnError) {
+      const err = spawnError as NodeJS.ErrnoException;
+      yield {
+        type: "error",
+        code: err.code === "ENOENT" ? "spawn_enoent" : "spawn_failed",
+        text:
+          err.code === "ENOENT"
+            ? `spawn ENOENT: either the binary '${claude}' or the cwd '${cwd}' is missing/inaccessible. ` +
+              `Verify: 'ls -la ${claude}' and 'ls -la ${cwd}' on the customer box.`
+            : `Spawn failed: ${err.message}`,
       };
       return;
     }

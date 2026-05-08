@@ -107,7 +107,7 @@ function loadSystemPrompt(agent) {
         }
         catch { /* next */ }
     }
-    return `You are osModa, an AI system administrator with full root access. You manage this NixOS server using 91 tools via MCP.`;
+    return `You are osModa, an AI system administrator with full root access. You manage this NixOS server using 92 tools via MCP.`;
 }
 // ── Boot ────────────────────────────────────────────────────────────────
 const startTime = Date.now();

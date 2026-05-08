@@ -861,16 +861,23 @@ report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 
 # Multi-agent workspace layout:
-#   /root/workspace/               — main agent (Opus, full access) [shared]
-#   ~/.openclaw/workspace-osmoda/  — OpenClaw main workspace (used when runtime=openclaw)
-#   ~/.openclaw/workspace-mobile/  — OpenClaw mobile workspace (used when runtime=openclaw)
-#   /var/lib/osmoda/workspace-mobile/ — mobile agent workspace (Claude Code)
+#   /root/workspace/                  — main agent (Opus, full access) [shared]
+#   /var/lib/osmoda/workspace-osmoda/ — main agent workspace (Claude Code profile_dir)
+#   /var/lib/osmoda/workspace-mobile/ — mobile agent workspace (Claude Code profile_dir)
+#   ~/.openclaw/workspace-osmoda/     — OpenClaw main workspace (only if runtime=openclaw)
+#   ~/.openclaw/workspace-mobile/     — OpenClaw mobile workspace (only if runtime=openclaw)
 OC_BASE="/root/.openclaw"
 WS_OSMODA="$OC_BASE/workspace-osmoda"
 WS_MOBILE="$OC_BASE/workspace-mobile"
+WS_OSMODA_CC="$STATE_DIR/workspace-osmoda"
 WS_MOBILE_CC="$STATE_DIR/workspace-mobile"
 
-mkdir -p "$WORKSPACE_DIR" "$WS_MOBILE_CC"
+# Both Claude-Code profile_dirs MUST exist regardless of selected runtime —
+# the gateway config (gateway.json) hard-codes /var/lib/osmoda/workspace-<id>
+# as the `profile_dir`, and node's child_process.spawn() returns ENOENT when
+# its `cwd` is missing (manifests as a misleading "spawn /usr/local/bin/claude
+# ENOENT" in the gateway log + crashes the gateway).
+mkdir -p "$WORKSPACE_DIR" "$WS_OSMODA_CC" "$WS_MOBILE_CC"
 if [ "$RUNTIME" = "openclaw" ]; then
   mkdir -p "$WS_OSMODA" "$WS_MOBILE"
   mkdir -p "$OC_BASE/agents/osmoda/agent" "$OC_BASE/agents/osmoda/sessions"

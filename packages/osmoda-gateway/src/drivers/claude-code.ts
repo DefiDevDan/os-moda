@@ -145,7 +145,17 @@ export const claudeCodeDriver: RuntimeDriver = {
 
     let proc: ChildProcess;
     try {
-      proc = spawn(claude, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+      // v1.3.20 — `detached: true` makes claude its own process-group leader
+      // so we can kill the WHOLE tree on abort (claude + Bash + file ops +
+      // any subprocess it forked). Without this, proc.kill("SIGTERM") only
+      // signals claude itself; its children orphan and keep running, with
+      // their stdout still flowing through the pipes back to us. User
+      // sees "Stop" do nothing while tool output keeps streaming.
+      proc = spawn(claude, args, {
+        cwd, env,
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
+      });
     } catch (e) {
       yield {
         type: "error",
@@ -203,7 +213,22 @@ export const claudeCodeDriver: RuntimeDriver = {
     proc.stdin?.end();
 
     if (opts.abortSignal) {
-      opts.abortSignal.addEventListener("abort", () => { proc.kill("SIGTERM"); }, { once: true });
+      // v1.3.20 — Kill the process GROUP, not just the leader. With
+      // `detached: true` above, proc.pid is the pgrp id. `process.kill(-pid)`
+      // signals every process in the group → claude AND every subprocess
+      // it forked (Bash for tool calls, file ops, npm installs, etc).
+      // Then race a 2-second SIGKILL escalation: if anything in the group
+      // ignored SIGTERM (or claude trapped it for graceful shutdown that
+      // takes 30+ seconds), force-kill it.
+      opts.abortSignal.addEventListener("abort", () => {
+        const pid = proc.pid;
+        if (typeof pid !== "number") return;
+        try { process.kill(-pid, "SIGTERM"); } catch { /* group already gone */ }
+        setTimeout(() => {
+          try { process.kill(-pid, 0); } catch { return; } // already dead → noop
+          try { process.kill(-pid, "SIGKILL"); } catch { /* race: died between checks */ }
+        }, 2000);
+      }, { once: true });
     }
 
     const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
@@ -283,7 +308,17 @@ export const claudeCodeDriver: RuntimeDriver = {
 
     const exitCode = await new Promise<number>((resolve) => {
       proc.on("close", (c) => resolve(c ?? 1));
-      setTimeout(() => { proc.kill("SIGKILL"); resolve(124); }, 600000);
+      // v1.3.20 — Hard timeout: 10 min cap on a single chat turn. SIGKILL
+      // the whole process group (we spawned detached) so any subprocess
+      // chain dies cleanly instead of orphaning. Was: SIGKILL on the
+      // leader only.
+      setTimeout(() => {
+        const pid = proc.pid;
+        if (typeof pid === "number") {
+          try { process.kill(-pid, "SIGKILL"); } catch { /* already dead */ }
+        }
+        resolve(124);
+      }, 600000);
     });
 
     if (exitCode !== 0 && !hasOutput && !opts.abortSignal?.aborted) {

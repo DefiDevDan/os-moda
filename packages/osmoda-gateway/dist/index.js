@@ -378,8 +378,24 @@ async function sendTelegram(botToken, chatId, text) {
     });
 }
 // ── Start ───────────────────────────────────────────────────────────────
-server.listen(env.port, "0.0.0.0", () => {
-    console.log(`[gateway] osModa Gateway (modular) listening on port ${env.port}`);
+// v1.3.18 — Bind to 127.0.0.1 by default. The gateway's HTTP+WS surface
+// only needs to be reachable by:
+//   1. The customer's own scripts (curl over loopback) — fine on localhost
+//   2. The spawn-app's gatewayProxy — which SSH-tunnels in, then curl's
+//      http://127.0.0.1:18789/config/* (so loopback works perfectly)
+//   3. The customer's SSH tunnel from a laptop (`ssh -L 18789:localhost:18789`)
+// There is NO production reason to expose this on 0.0.0.0. Token auth
+// alone is not a sufficient defense — defense in depth requires we don't
+// publish the surface in the first place.
+//
+// Override: set OSMODA_GATEWAY_BIND=0.0.0.0 in env if you genuinely need
+// public access (and accept the responsibility).
+const bindHost = process.env.OSMODA_GATEWAY_BIND || "127.0.0.1";
+server.listen(env.port, bindHost, () => {
+    console.log(`[gateway] osModa Gateway (modular) listening on ${bindHost}:${env.port}`);
+    if (bindHost === "0.0.0.0") {
+        console.warn(`[gateway] ⚠️  bound to 0.0.0.0 — gateway is reachable from the public internet. Set OSMODA_GATEWAY_BIND=127.0.0.1 to lock down.`);
+    }
     console.log(`[gateway] drivers: ${listDrivers().map(d => d.name).join(", ")}`);
     const current = cache.current();
     console.log(`[gateway] agents: ${current.agents.map(a => `${a.id}(${a.runtime}/${a.model})`).join(", ") || "<none>"}`);

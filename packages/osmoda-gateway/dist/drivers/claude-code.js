@@ -314,10 +314,14 @@ export const claudeCodeDriver = {
         }
         const exitCode = await new Promise((resolve) => {
             proc.on("close", (c) => resolve(c ?? 1));
-            // v1.3.20 — Hard timeout: 10 min cap on a single chat turn. SIGKILL
-            // the whole process group (we spawned detached) so any subprocess
-            // chain dies cleanly instead of orphaning. Was: SIGKILL on the
-            // leader only.
+            // v1.3.24 — Hard cap bumped from 10 min to 8 hours by default.
+            // Users running multi-hour build tasks (full app scaffolds, large
+            // refactors, long-running scrapes) were hitting the 10-min wall
+            // and losing their work. The user's only kill switches now are:
+            //   1. The Stop button (sends `{type:"abort"}` → SIGTERM the group)
+            //   2. This 8-hour absolute backstop for runaway processes
+            // Override via env: OSMODA_CHAT_HARD_CAP_MS=<ms>.
+            const hardCapMs = parseInt(process.env.OSMODA_CHAT_HARD_CAP_MS || "28800000", 10); // 8h
             setTimeout(() => {
                 const pid = proc.pid;
                 if (typeof pid === "number") {
@@ -327,7 +331,7 @@ export const claudeCodeDriver = {
                     catch { /* already dead */ }
                 }
                 resolve(124);
-            }, 600000);
+            }, hardCapMs);
         });
         if (exitCode !== 0 && !hasOutput && !opts.abortSignal?.aborted) {
             const errMsg = stderrText.trim().split("\n").pop() || `claude exited with code ${exitCode}`;

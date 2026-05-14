@@ -115,6 +115,22 @@ export const openClawDriver: RuntimeDriver = {
       return;
     }
 
+    const cwd = opts.workingDir || "/root";
+    // Pre-flight cwd — parity with claude-code driver: child_process.spawn()
+    // returns ENOENT later with a misleading message when cwd is missing.
+    try { fs.accessSync(cwd, fs.constants.R_OK | fs.constants.X_OK); }
+    catch {
+      yield {
+        type: "error",
+        code: "workspace_missing",
+        text:
+          `Workspace directory '${cwd}' does not exist or isn't readable. ` +
+          `Create it on the customer box: 'mkdir -p ${cwd}' and retry.`,
+      };
+      yield { type: "done" };
+      return;
+    }
+
     const args = [
       "run",
       "--agent", opts.agent.id,
@@ -125,13 +141,72 @@ export const openClawDriver: RuntimeDriver = {
     ];
     if (opts.sessionId) args.push("--resume", opts.sessionId);
 
-    const proc: ChildProcess = spawn(bin, args, {
-      cwd: opts.workingDir || "/root",
-      env: { ...process.env, HOME: process.env.HOME || "/root" },
-      stdio: ["pipe", "pipe", "pipe"],
+    let proc: ChildProcess;
+    try {
+      // Parity with claude-code driver: `detached: true` so the Stop button
+      // can kill the whole process group (openclaw + Bash + tool calls + any
+      // subprocess it forked). Without this, SIGTERM only hits the leader,
+      // children orphan, output keeps streaming back.
+      proc = spawn(bin, args, {
+        cwd,
+        env: { ...process.env, HOME: process.env.HOME || "/root" },
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
+      });
+    } catch (e) {
+      yield {
+        type: "error",
+        code: "spawn_failed",
+        text: `Failed to spawn openclaw: ${e instanceof Error ? e.message : String(e)}`,
+      };
+      yield { type: "done" };
+      return;
+    }
+
+    // Trap async ENOENT from spawn — without this, the unhandled 'error'
+    // event would crash the gateway (Node default behavior).
+    let spawnError: NodeJS.ErrnoException | null = null;
+    let spawnErrorResolved = false;
+    const spawnErrorPromise = new Promise<void>((resolve) => {
+      proc.once("error", (e: NodeJS.ErrnoException) => {
+        spawnError = e;
+        spawnErrorResolved = true;
+        resolve();
+      });
+      proc.once("exit", () => {
+        if (!spawnErrorResolved) { spawnErrorResolved = true; resolve(); }
+      });
     });
+    await Promise.race([spawnErrorPromise, new Promise((r) => setImmediate(r))]);
+    if (spawnError) {
+      const err = spawnError as NodeJS.ErrnoException;
+      yield {
+        type: "error",
+        code: err.code === "ENOENT" ? "spawn_enoent" : "spawn_failed",
+        text:
+          err.code === "ENOENT"
+            ? `spawn ENOENT: either '${bin}' or cwd '${cwd}' is missing. ` +
+              `Verify: 'ls -la ${bin}' and 'ls -la ${cwd}' on the customer box.`
+            : `Spawn failed: ${err.message}`,
+      };
+      yield { type: "done" };
+      return;
+    }
+    // Close stdin — openclaw reads args, not stdin.
+    proc.stdin?.end();
+
     if (opts.abortSignal) {
-      opts.abortSignal.addEventListener("abort", () => { proc.kill("SIGTERM"); }, { once: true });
+      // Kill the process GROUP, not just the leader. Then race a 2s SIGKILL
+      // escalation for anything that ignored SIGTERM.
+      opts.abortSignal.addEventListener("abort", () => {
+        const pid = proc.pid;
+        if (typeof pid !== "number") return;
+        try { process.kill(-pid, "SIGTERM"); } catch { /* group gone */ }
+        setTimeout(() => {
+          try { process.kill(-pid, 0); } catch { return; }
+          try { process.kill(-pid, "SIGKILL"); } catch { /* race */ }
+        }, 2000);
+      }, { once: true });
     }
 
     const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
@@ -180,7 +255,16 @@ export const openClawDriver: RuntimeDriver = {
 
     const code = await new Promise<number>((resolve) => {
       proc.on("close", (c) => resolve(c ?? 1));
-      setTimeout(() => { proc.kill("SIGKILL"); resolve(124); }, 600000);
+      // Parity with claude-code: 8h hard cap, env-overridable. The Stop button
+      // (abortSignal → SIGTERM the group) is the user's real kill switch.
+      const hardCapMs = parseInt(process.env.OSMODA_CHAT_HARD_CAP_MS || "28800000", 10);
+      setTimeout(() => {
+        const pid = proc.pid;
+        if (typeof pid === "number") {
+          try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+        }
+        resolve(124);
+      }, hardCapMs);
     });
     if (code !== 0 && !hasOutput && !opts.abortSignal?.aborted) {
       yield { type: "error", text: stderrText.trim().split("\n").pop() || `openclaw exited ${code}` };

@@ -229,7 +229,7 @@ wss.on("connection", (ws, req) => {
     }
 
     const sessionKey = msg.sessionKey || "ws-default";
-    const session = sessions.getOrCreate(sessionKey, "web", agent.id);
+    const session = sessions.getOrCreate(sessionKey, "web", agent.id, agent.runtime);
     abortController = new AbortController();
     const systemPrompt = loadSystemPrompt(agent);
 
@@ -243,7 +243,7 @@ wss.on("connection", (ws, req) => {
         workingDir: agent.profile_dir,
       })) {
         if (ws.readyState !== WebSocket.OPEN) break;
-        pipeEvent(ws, event, sessionKey);
+        pipeEvent(ws, event, sessionKey, agent.runtime);
       }
     } catch (e: any) {
       if (ws.readyState === WebSocket.OPEN) {
@@ -256,7 +256,7 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => { if (abortController) abortController.abort(); });
 });
 
-function pipeEvent(ws: WebSocket, event: AgentEvent, sessionKey: string): void {
+function pipeEvent(ws: WebSocket, event: AgentEvent, sessionKey: string, runtime?: string): void {
   switch (event.type) {
     case "text":
       ws.send(JSON.stringify({ type: "text", text: event.text })); break;
@@ -267,10 +267,10 @@ function pipeEvent(ws: WebSocket, event: AgentEvent, sessionKey: string): void {
     case "thinking":
       ws.send(JSON.stringify({ type: "thinking", text: event.text })); break;
     case "session":
-      if (event.sessionId) sessions.updateClaudeSession(sessionKey, "web", event.sessionId);
+      if (event.sessionId) sessions.updateClaudeSession(sessionKey, "web", event.sessionId, runtime);
       break;
     case "done":
-      if (event.sessionId) sessions.updateClaudeSession(sessionKey, "web", event.sessionId);
+      if (event.sessionId) sessions.updateClaudeSession(sessionKey, "web", event.sessionId, runtime);
       ws.send(JSON.stringify({ type: "done" }));
       break;
     case "error":
@@ -318,7 +318,7 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
     await sendTelegram(env.telegramBotToken, chatId, `Agent runtime ${agent.runtime} not available.`); return;
   }
 
-  const session = sessions.getOrCreate(chatId, "telegram", agent.id);
+  const session = sessions.getOrCreate(chatId, "telegram", agent.id, agent.runtime);
   const systemPrompt = loadSystemPrompt(agent);
   let fullText = "";
 
@@ -332,10 +332,10 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
     })) {
       if (event.type === "text" && event.text) fullText += event.text;
       if (event.type === "session" && event.sessionId) {
-        sessions.updateClaudeSession(chatId, "telegram", event.sessionId);
+        sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime);
       }
       if (event.type === "done" && event.sessionId) {
-        sessions.updateClaudeSession(chatId, "telegram", event.sessionId);
+        sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime);
       }
     }
   } catch (e: any) { fullText = `Error: ${e?.message || String(e)}`; }

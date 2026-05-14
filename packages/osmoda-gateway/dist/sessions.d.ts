@@ -18,6 +18,14 @@
 export interface Session {
     id: string;
     agentId: string;
+    /**
+     * Runtime that minted `claudeSessionId`. When the agent's runtime changes
+     * (user flips claude-code ↔ openclaw via the Engine tab), this won't match
+     * and we wipe `claudeSessionId` rather than passing a foreign id to the new
+     * driver's `--resume` (which would error or, worse, "resume" the wrong
+     * thing). Set when claudeSessionId is bound.
+     */
+    runtime?: string;
     claudeSessionId?: string;
     lastActivity: number;
     userId: string;
@@ -33,8 +41,8 @@ export declare class SessionStore {
     private saveNow;
     /** Force a synchronous flush (call on SIGTERM if you want to be paranoid). */
     flush(): void;
-    getOrCreate(userId: string, channel: string, agentId: string): Session;
-    updateClaudeSession(userId: string, channel: string, claudeSessionId: string): void;
+    getOrCreate(userId: string, channel: string, agentId: string, runtime?: string): Session;
+    updateClaudeSession(userId: string, channel: string, claudeSessionId: string, runtime?: string): void;
     /** Forget the claude session id (e.g. user asks to start over). */
     clearClaudeSession(userId: string, channel: string): void;
     private evictIfOver;

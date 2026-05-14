@@ -748,32 +748,37 @@ if [ ! -d node_modules ]; then
   npm install 2>&1 | tail -3 || die "Failed to install MCP bridge dependencies"
 fi
 
-# OpenClaw is optional — install it when the user explicitly chose runtime=openclaw
-# so the openclaw driver has a binary to spawn. Users can switch runtime later
-# via the dashboard without re-running install.sh; installing OpenClaw now just
-# makes it available from day one.
-if [ "$RUNTIME" = "openclaw" ]; then
-  log "Installing OpenClaw binary (for the openclaw driver)..."
-  if ! command -v openclaw &>/dev/null; then
-    mkdir -p "$OPENCLAW_DIR"
-    cd "$OPENCLAW_DIR"
-    if [ ! -f package.json ]; then
-      npm init -y >/dev/null 2>&1
-    fi
-    npm install openclaw 2>&1 | tail -3 || warn "Failed to install OpenClaw via npm — openclaw driver will be unavailable until resolved"
+# OpenClaw is installed on EVERY box (regardless of selected runtime) so the
+# dashboard's Engine tab can flip runtime without re-running install.sh. If
+# the npm install fails (offline / registry hiccup) we just warn — claude-code
+# stays functional and the user can retry openclaw later via:
+#   ssh <box> "cd /opt/openclaw && npm install openclaw && systemctl restart osmoda-gateway"
+log "Installing OpenClaw binary (so the openclaw driver is always switchable from the dashboard)..."
+if ! command -v openclaw &>/dev/null; then
+  mkdir -p "$OPENCLAW_DIR"
+  cd "$OPENCLAW_DIR"
+  if [ ! -f package.json ]; then
+    npm init -y >/dev/null 2>&1
+  fi
+  if npm install openclaw 2>&1 | tail -3; then
     if [ -x "$OPENCLAW_DIR/node_modules/.bin/openclaw" ]; then
       ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
-      echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
+      grep -q 'OPENCLAW_DIR' /etc/profile.d/osmoda.sh 2>/dev/null || \
+        echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"  # OPENCLAW_DIR" >> /etc/profile.d/osmoda.sh
       export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
       log "OpenClaw installed (version $(${OPENCLAW_DIR}/node_modules/.bin/openclaw --version 2>/dev/null | head -1 || echo '?'))"
+    else
+      warn "OpenClaw installed but binary not found at expected path — openclaw runtime won't switch until resolved"
     fi
+  else
+    warn "Failed to install OpenClaw via npm (network / registry issue) — claude-code runtime still works; retry with: cd $OPENCLAW_DIR && npm install openclaw"
   fi
 fi
 
 # ---------------------------------------------------------------------------
 # Step 6: Set up tool bridge
 # ---------------------------------------------------------------------------
-report_progress "openclaw" "done" "$RUNTIME runtime installed"
+report_progress "openclaw" "done" "Both runtimes installed (default=$RUNTIME, openclaw available via dashboard)"
 
 # ---------------------------------------------------------------------------
 # Step 6.5: Spec-Kit (GitHub Spec-Driven Development toolkit)

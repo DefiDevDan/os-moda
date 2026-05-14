@@ -31,6 +31,14 @@ const SAVE_DEBOUNCE_MS = 250;
 export interface Session {
   id: string;
   agentId: string;
+  /**
+   * Runtime that minted `claudeSessionId`. When the agent's runtime changes
+   * (user flips claude-code ↔ openclaw via the Engine tab), this won't match
+   * and we wipe `claudeSessionId` rather than passing a foreign id to the new
+   * driver's `--resume` (which would error or, worse, "resume" the wrong
+   * thing). Set when claudeSessionId is bound.
+   */
+  runtime?: string;
   claudeSessionId?: string;
   lastActivity: number;
   userId: string;
@@ -57,6 +65,7 @@ export class SessionStore {
             this.sessions.set(`${s.channel}:${s.userId}`, {
               id: s.id,
               agentId: s.agentId ?? "default",
+              runtime: typeof s.runtime === "string" ? s.runtime : undefined,
               claudeSessionId: s.claudeSessionId,
               lastActivity: typeof s.lastActivity === "number" ? s.lastActivity : Date.now(),
               userId: s.userId,
@@ -109,7 +118,7 @@ export class SessionStore {
     this.saveNow();
   }
 
-  getOrCreate(userId: string, channel: string, agentId: string): Session {
+  getOrCreate(userId: string, channel: string, agentId: string, runtime?: string): Session {
     const key = `${channel}:${userId}`;
     const existing = this.sessions.get(key);
     const now = Date.now();
@@ -117,10 +126,28 @@ export class SessionStore {
     if (existing) {
       existing.lastActivity = now;
       if (existing.agentId !== agentId) existing.agentId = agentId;
+
+      // Runtime swap (e.g. claude-code → openclaw via Engine tab) — the prior
+      // session id belongs to a different CLI and is meaningless here. Wipe it
+      // so the new driver starts a clean conversation; never pass a foreign
+      // id to `--resume`.
+      if (runtime && existing.runtime && existing.runtime !== runtime && existing.claudeSessionId) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[sessions] runtime swap ${existing.runtime} → ${runtime} for key=${key}; ` +
+            `dropping prior claude_session=${existing.claudeSessionId}`,
+        );
+        existing.claudeSessionId = undefined;
+        existing.runtime = runtime;
+      } else if (runtime && !existing.runtime) {
+        existing.runtime = runtime;
+      }
+
       this.scheduleSave();
       // eslint-disable-next-line no-console
       console.log(
-        `[sessions] resume key=${key} claude_session=${existing.claudeSessionId || "(none yet)"}`,
+        `[sessions] resume key=${key} runtime=${existing.runtime || "?"} ` +
+          `claude_session=${existing.claudeSessionId || "(none yet)"}`,
       );
       return existing;
     }
@@ -128,6 +155,7 @@ export class SessionStore {
     const session: Session = {
       id: `sess-${now}-${Math.random().toString(36).slice(2, 8)}`,
       agentId,
+      runtime,
       claudeSessionId: undefined,
       lastActivity: now,
       userId,
@@ -137,20 +165,23 @@ export class SessionStore {
     this.evictIfOver();
     this.scheduleSave();
     // eslint-disable-next-line no-console
-    console.log(`[sessions] NEW key=${key} session=${session.id}`);
+    console.log(`[sessions] NEW key=${key} runtime=${runtime || "?"} session=${session.id}`);
     return session;
   }
 
-  updateClaudeSession(userId: string, channel: string, claudeSessionId: string): void {
+  updateClaudeSession(userId: string, channel: string, claudeSessionId: string, runtime?: string): void {
     const key = `${channel}:${userId}`;
     const session = this.sessions.get(key);
     if (!session) return;
     const changed = session.claudeSessionId !== claudeSessionId;
     session.claudeSessionId = claudeSessionId;
+    if (runtime) session.runtime = runtime;
     session.lastActivity = Date.now();
     if (changed) {
       // eslint-disable-next-line no-console
-      console.log(`[sessions] bind key=${key} claude_session=${claudeSessionId}`);
+      console.log(
+        `[sessions] bind key=${key} runtime=${session.runtime || "?"} claude_session=${claudeSessionId}`,
+      );
     }
     this.scheduleSave();
   }

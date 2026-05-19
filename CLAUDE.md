@@ -8,6 +8,15 @@ The agent runs via Claude Code SDK with full root-level access to the entire sys
 The agent has FULL system access. Root. All files. All processes. All APIs.
 The sandbox exists for UNTRUSTED third-party tools, not for the agent itself.
 
+## Current state
+
+- **osmoda-gateway** v0.2.1 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps)
+- **Spawn-app API** v1.3.x (latest documented v1.3.1; internal v1.3.30 with the chat persistence + watchdog + Engine UX work)
+- **Claude Code CLI** ^2.1.75 pin (refuses anything <2.x via gateway healthCheck)
+- **OpenClaw** installed on every spawn but `unavailable` until the driver is ported to OpenClaw 2026.5+ (renamed `run` → `agent`, needs `agents add` registration step). See `packages/osmoda-gateway/src/drivers/openclaw.ts` `healthCheck()` for the exact CLI-port gate.
+
+See [`docs/STATUS.md`](docs/STATUS.md) for full per-component maturity + the latest operational hardening (2026-05-19: gateway 0.2.1, dual-signal wedge detector, healthCheck infrastructure, process-group abort, 8h hard cap, 127.0.0.1 lockdown).
+
 ## Architecture (3 trust tiers)
 
 ```
@@ -27,8 +36,9 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **osmoda-gateway** (TypeScript) - **Modular agent gateway** (v0.2+). HTTP+WS server on port 18789.
-   Always the systemd unit. Routes per-agent to a pluggable runtime driver:
+2. **osmoda-gateway** (TypeScript, **v0.2.1**) - **Modular agent gateway**. HTTP+WS server on 127.0.0.1:18789
+   (binds to localhost; public reach is via the spawn-server SSH proxy). Always the systemd unit.
+   Routes per-agent to a pluggable runtime driver:
    - `claude-code` driver - wraps `claude` CLI (OAuth or API key)
    - `openclaw` driver - spawns `openclaw` binary as child process per session
    - Adding a driver = one file under `src/drivers/` (Codex, Bedrock, …)
@@ -37,6 +47,25 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    `/var/lib/osmoda/config/credentials.json.enc` (AES-256-GCM). REST `/config/*`
    endpoints (Bearer-authed) let the dashboard edit runtime/credentials/model per
    agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 92 MCP tools.
+
+   **Sessions are disk-persisted** at `/var/lib/osmoda/state/sessions.json`
+   (mode 0600, atomic tmp+rename, debounced 250 ms). Survives gateway restarts,
+   wedge auto-restart, install.sh re-runs, OS reboots. Sessions are *runtime-
+   tagged* — flipping `claude-code` ↔ `openclaw` via the Engine tab wipes the
+   foreign session id and starts cleanly in the new runtime (no `--resume` of
+   the wrong CLI's session). Two-tier persistence covers the ws-relay-drop /
+   crash-loop class: spawn-app side checkpoints `_currentChatStreamText` +
+   `_currentChatRequestId` to `data/chat-inflight/<orderId>.json` on every
+   500 chars or 2 s, and rehydrates on boot.
+
+   **Runtime swaps are gated by `healthCheck()`**. Each driver probes its
+   binary on demand (claude-code: `claude --version`, refuses <2.x; openclaw:
+   `openclaw --help`, refuses if the `run` subcommand isn't exposed). `GET
+   /config/drivers` returns `{available, version, error, remediation}` per
+   driver; `PATCH /config/agents/{id}` blocks an unhealthy swap with
+   `422 driver_unavailable` + actionable remediation. Caught the 2026-05-14
+   incident where OpenClaw 2026.5.7 renamed `run` → `agent`; chat after a
+   swap died with a bare `agent_error`. Can't recur.
 
 2b. **osmoda-bridge** (TypeScript) - OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
    `api.registerTool()` factory pattern (92 tools): system_health, system_query,

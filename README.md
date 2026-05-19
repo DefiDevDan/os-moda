@@ -232,6 +232,10 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 | **Fleet coordination** | Multi-server changes go through quorum voting via `fleet_propose`/`fleet_vote` before applying. |
 | **Safety commands** | `safety_rollback`, `safety_panic`, `safety_status`, `safety_restart` bypass the AI entirely — the user always has an escape hatch. |
 | **Pentest verified** | Full automated pentest: injection attacks (SQL, path traversal, shell), payload bombs, error hardening, stress testing (700/700 concurrent health checks). All pass. |
+| **Session persistence** | The agent's claude-code session id is disk-persisted (`/var/lib/osmoda/state/sessions.json`, mode 0600). Restart the gateway, the box, even reinstall — the agent remembers the conversation. Sessions are runtime-tagged so swapping `claude-code` ↔ `openclaw` never resumes a foreign runtime's session id. |
+| **Driver health checks** | Every runtime driver implements `healthCheck()`. The gateway probes the binary's CLI shape before allowing a runtime swap. Unhealthy drivers return `422 driver_unavailable` with the exact error + remediation rather than letting chat silently fail later. Caught the 2026-05-14 OpenClaw `run`→`agent` CLI rename within the same hour. |
+| **Process-group abort** | The Stop button kills the entire subprocess tree (`detached: true` spawn + group-signal + 2 s SIGKILL escalation), not just the runtime leader. Bash spawned by the agent, file I/O, child processes — all stopped at once. |
+| **Dual-signal wedge detector** | A server is flagged "wedged" only when both `last_heartbeat` AND `agent_last_frame_at` are stale ≥5 min. Eliminated the false-positive class where the heartbeat sender was broken but the agent was happily answering chat. |
 
 ### What NixOS rollback covers — and what it doesn't
 

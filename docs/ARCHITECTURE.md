@@ -26,7 +26,7 @@ TIER 2: Untrusted Execution
   User scripts, pip packages, npm installs, third-party binaries.
 ```
 
-## Agent gateway — modular runtime (v0.2+)
+## Agent gateway — modular runtime (v0.2.1)
 
 ```
                       ┌─────────────────────────┐
@@ -77,6 +77,26 @@ agents.json. In-flight sessions keep their original driver + credential snapshot
 `/config/credentials`, `/config/credentials/:id/test`, `/config/reload`,
 `/config/health`. Used by the dashboard to switch runtime / swap credentials
 / test validity without SSH.
+
+**Session persistence (v0.2.1).** The gateway maps `{channel, userId}` →
+`claudeSessionId` and disk-persists the map to
+`/var/lib/osmoda/state/sessions.json` (mode 0600, atomic tmp+rename,
+debounced 250 ms). Survives gateway restarts, wedge auto-restarts, OS
+reboots. Sessions are *runtime-tagged* — if an agent's runtime flips
+`claude-code` ↔ `openclaw` (Engine tab → SIGHUP), the next message detects
+the swap and wipes the stale session id rather than passing a foreign id to
+the new driver's `--resume`. Bounded by MAX_SESSIONS (1000) with LRU
+eviction.
+
+**Driver health checks (v0.2.1).** Every `RuntimeDriver` implements
+`healthCheck(): { available, version, error, remediation }`. The gateway
+calls it from `/config/drivers` (live in dashboard Engine tab badge) and
+gates every `PATCH /config/agents/{id}` runtime swap — unhealthy drivers
+return `422 driver_unavailable` with the exact reason and remediation
+hint. The probe is cheap (one `--version` or `--help` per driver,
+parallelised) and idempotent. Caught the 2026-05-14 OpenClaw
+`run`→`agent` CLI rename within the same hour; before this contract,
+every chat after the swap died with a bare `agent_error`.
 
 ## Component Architecture
 

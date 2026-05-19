@@ -1,4 +1,4 @@
-# osModa — Project Status
+# osModa - Project Status
 
 Honest assessment of what works, what's placeholder, and what's next.
 
@@ -8,35 +8,35 @@ Last updated: 2026-05-06
 
 | Area | Change | Why |
 |---|---|---|
-| PAM hardening | **`v1.2.7` adds 3 layers of defense against the Hetzner Ubuntu PAM password-expiry trap**: (1) install.sh installs `osmoda-pam-self-heal.service` — boot-time idempotent re-application of the chage fix; (2) `sshExec()` on the spawn server detects the `Password change required but no TTY` error and auto-recovers via Hetzner `reset_password` API + `sshpass` + chage fix + retry; (3) wedged-server detector flips `agent_wedged:true` on running orders with >5 min stale heartbeat, then auto-kicks the v1.2.6 `agent_restart`. New agent-card flags `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`. | A real customer wedge (order `7e120a65-574f-…`) couldn't be remotely recovered: SSH key auth was being blocked by PAM after Hetzner's `chage` quirk. Delete+respawn was the only path, losing chat history. v1.2.7 closes that gap on every layer (install-time, run-time, operationally). Most future wedges should self-heal in 30–60 s. |
+| PAM hardening | **`v1.2.7` adds 3 layers of defense against the cloud Ubuntu PAM password-expiry trap**: (1) install.sh installs `osmoda-pam-self-heal.service` - boot-time idempotent re-application of the chage fix; (2) `sshExec()` on the spawn server detects the `Password change required but no TTY` error and auto-recovers via cloud provider `reset_password` API + `sshpass` + chage fix + retry; (3) wedged-server detector flips `agent_wedged:true` on running orders with >5 min stale heartbeat, then auto-kicks the v1.2.6 `agent_restart`. New agent-card flags `pam_self_heal:true`, `ssh_auto_recovery:true`, `wedged_server_detector:true`. | A real customer wedge (order `7e120a65-574f-…`) couldn't be remotely recovered: SSH key auth was being blocked by PAM after cloud provider's `chage` quirk. Delete+respawn was the only path, losing chat history. v1.2.7 closes that gap on every layer (install-time, run-time, operationally). Most future wedges should self-heal in 30–60 s. |
 
 ## Recent operational changes (2026-05-06 · v1.2.6)
 
 | Area | Change | Why |
 |---|---|---|
-| Agent control | **`v1.2.6` adds 2 dashboard endpoints + 1 derived field**: `POST /agents/:agent/restart` (202 with `restart_id`), `GET .../restart/:restart_id` (status: `restarting`/`ready`/`timeout`/`failed`). New `agent_responsive` boolean + `last_responsive_at` ts on the dashboard server-list response — derived from heartbeat staleness, no token burn. New `Agent control (dashboard)` tag in OpenAPI. Agent-card flags `agent_restart_endpoint:true`, `agent_responsiveness_probe:true`. install.sh patched: `chage -d $(today) root` so Hetzner PAM doesn't flag the root password as expired and block SSH key auth. | Real customer wedge on order `7e120a65-…`: chat-async accepted, agent silent for 3+ hours, heartbeat stale, SSH-restart blocked by Hetzner PAM password-expiry bug. Integrator's only paths were "delete + lose history" or "SSH yourself + hit the same PAM bug". The new endpoint surfaces a self-service restart and explicitly recommends delete+respawn when it hits the legacy PAM trap (which is now fixed for new spawns). |
+| Agent control | **`v1.2.6` adds 2 dashboard endpoints + 1 derived field**: `POST /agents/:agent/restart` (202 with `restart_id`), `GET .../restart/:restart_id` (status: `restarting`/`ready`/`timeout`/`failed`). New `agent_responsive` boolean + `last_responsive_at` ts on the dashboard server-list response - derived from heartbeat staleness, no token burn. New `Agent control (dashboard)` tag in OpenAPI. Agent-card flags `agent_restart_endpoint:true`, `agent_responsiveness_probe:true`. install.sh patched: `chage -d $(today) root` so cloud provider PAM doesn't flag the root password as expired and block SSH key auth. | Real customer wedge on order `7e120a65-…`: chat-async accepted, agent silent for 3+ hours, heartbeat stale, SSH-restart blocked by cloud provider PAM password-expiry bug. Integrator's only paths were "delete + lose history" or "SSH yourself + hit the same PAM bug". The new endpoint surfaces a self-service restart and explicitly recommends delete+respawn when it hits the legacy PAM trap (which is now fixed for new spawns). |
 
 ## Recent operational changes (2026-05-06 · v1.2.5)
 
 | Area | Change | Why |
 |---|---|---|
-| Streaming chat | **`v1.2.5` adds 3 dashboard endpoints**: `chat-async` (202 with `conversation_id`), `chat-stream` (SSE, cursor-resumable, 15 s keepalive), `chat-history` (JSON cold load). New `dashboardAuth` security scheme + `Streaming chat (dashboard)` tag in OpenAPI. New `ChatEvent` schema. New agent-card capabilities: `dashboard_streaming_chat:true`, `streaming_chat_protocol:"sse"`. Persistence at `data/chat-events/<conv>.ndjson` (append-only, 48 h sweep). | The platform integrating osModa (topimones.lt) had a UX gap — the synchronous `/chat` endpoint blocks for up to 120 s and the integrating UI couldn't show "agent is running tool X" or partial deltas, and a page refresh during a long reply lost in-flight state. The new flow mirrors the `/paieska` SSE pattern: `EventSource` reader + cursor-based resume. Integrator client diff drops to ~120 lines. |
+| Streaming chat | **`v1.2.5` adds 3 dashboard endpoints**: `chat-async` (202 with `conversation_id`), `chat-stream` (SSE, cursor-resumable, 15 s keepalive), `chat-history` (JSON cold load). New `dashboardAuth` security scheme + `Streaming chat (dashboard)` tag in OpenAPI. New `ChatEvent` schema. New agent-card capabilities: `dashboard_streaming_chat:true`, `streaming_chat_protocol:"sse"`. Persistence at `data/chat-events/<conv>.ndjson` (append-only, 48 h sweep). | The platform integrating osModa (topimones.lt) had a UX gap - the synchronous `/chat` endpoint blocks for up to 120 s and the integrating UI couldn't show "agent is running tool X" or partial deltas, and a page refresh during a long reply lost in-flight state. The new flow mirrors the `/paieska` SSE pattern: `EventSource` reader + cursor-based resume. Integrator client diff drops to ~120 lines. |
 
 ## Recent operational changes (2026-05-04)
 
 | Area | Change | Why |
 |---|---|---|
 | Engine UX | Removed `(legacy)` from OpenClaw labels everywhere; added OpenClaw OAuth gating (cannot bind OAuth credentials to OpenClaw agents); polished credential add form with prefix validation + live help; added Claude Opus 4.7 as a model option in Engine tab + Settings; SDK exposes `isAuthTypeCompatible()` + master-list fallback for newly-released models | Production-quality engine surface for end-users who configure agents without SSH. |
-| Swarms | **Retired the entire Swarms (alpha) family** — 16 OpenAPI paths, 2 WS feeds, `apps/spawn/lib/swarms/` (829 LOC), `apps/spawn/public/swarms{,-venture-demo}.html`, `packages/osmoda-venture-bridge/`, all related schemas/tags/examples | Was a simulator pretending to be product (`SWARMS_REAL=1` real-mode never wired up). 0 swarms / 0 ventures live across 10 days. The same outcome — autonomous AI businesses — is delivered by spawning a server, opening WS chat, and prompting the agent. **Factories** (spec-kit) is the production surface. |
+| Swarms | **Retired the entire Swarms (alpha) family** - 16 OpenAPI paths, 2 WS feeds, `apps/spawn/lib/swarms/` (829 LOC), `apps/spawn/public/swarms{,-venture-demo}.html`, `packages/osmoda-venture-bridge/`, all related schemas/tags/examples | Was a simulator pretending to be product (`SWARMS_REAL=1` real-mode never wired up). 0 swarms / 0 ventures live across 10 days. The same outcome - autonomous AI businesses - is delivered by spawning a server, opening WS chat, and prompting the agent. **Factories** (spec-kit) is the production surface. |
 | API docs | OpenAPI bumped to **v1.2.3**; integrator quick-start in spec description; examples on every schema + multi-case examples on `/status`, `/spec-kit/projects`, agent card; new `Chat (WebSocket)` tag + virtual `/api/v1/chat/{orderId}` path so Swagger UI surfaces the WS protocol; CORS / rate-limit / idempotency / request-ID rules in spec description; "What v1 does NOT expose" callout for integrators; SDK README rewritten | Make `/api/v1/docs` self-sufficient for a third-party dashboard integrator. |
 
 ## Recent operational changes (2026-04-30)
 
 | Area | Change | Why |
 |---|---|---|
-| Spec-kit | github/spec-kit baked into every spawn (uv + specify-cli + templates) | Joins canonical AI-coding-agent ecosystem (92K stars). Closes the YC "software factories" weak-fit gap — see docs/planning/SPEC-KIT-INTEGRATION.md. |
+| Spec-kit | github/spec-kit baked into every spawn (uv + specify-cli + templates) | Joins canonical AI-coding-agent ecosystem (92K stars). Closes the YC "software factories" weak-fit gap - see docs/planning/SPEC-KIT-INTEGRATION.md. |
 | MCP | New `spec_kit_init` + `spec_kit_run` tools (91→92) | Agent invokes spec-driven dev as audited tool calls; ledger captures every phase transition. |
-| Skills | New `spec-driven-development` (19→20) | Heuristic — when to invoke spec-kit, the 8-step workflow, common pitfalls. |
+| Skills | New `spec-driven-development` (19→20) | Heuristic - when to invoke spec-kit, the 8-step workflow, common pitfalls. |
 | API | `GET /api/v1/spec-kit/projects` (Bearer) | External SaaS integrators can list per-server spec-driven projects without SSHing in. |
 | Agent card | `spec_driven_development:true` + `spec_kit_version` capability flags | Discoverable by other agents via `/.well-known/agent-card.json`. |
 | OpenAPI | Bumped 1.2.1 → **1.2.2** | New `Spec-Kit` tag + `SpecKitProject` schema + 1 path. Total 26 documented paths. |
@@ -51,7 +51,20 @@ Last updated: 2026-05-06
 | install.sh | Phase tracking + `report_failed()` callback with last 200 log lines | Stuck-install class of incidents was invisible to dashboard |
 | Spawn watchdog | Cron flags any order without heartbeat 25 min after creation as `install_failed` | Safety net for kernel-reboot failures where install.sh trap can't fire |
 | Dashboard UI | Failure-state panel with phase + log + Rebuild / Heartbeat / Refund buttons | Operators no longer need SSH to diagnose stuck installs |
-| Spawn deploy.sh | `setsid` + explicit fd redirect to log file | Previous nohup-via-SSH was leaving fd 1/2 pointing at half-closed Unix sockets — log output silently dropped for hours |
+| Spawn deploy.sh | `setsid` + explicit fd redirect to log file | Previous nohup-via-SSH was leaving fd 1/2 pointing at half-closed Unix sockets - log output silently dropped for hours |
+
+## Recent operational changes (2026-05-19)
+
+| Area | Change | Why |
+|---|---|---|
+| Gateway sessions | **Disk-persisted** to `/var/lib/osmoda/state/sessions.json` (atomic tmp+rename, debounced 250 ms, mode 0600) | Was in-memory only. Gateway restart / config-reload / wedge auto-restart wiped `claudeSessionId` → next message ran `claude` without `--resume` → agent forgot the conversation. Now sessions are runtime-tagged so flipping claude-code ↔ openclaw wipes the foreign id and starts cleanly. |
+| Gateway version | Bumped 0.2.0 → **0.2.1** | Above + the healthCheck infrastructure below. |
+| Driver healthCheck | New `RuntimeDriver.healthCheck()` contract. claude-code probes `claude --version` (refuses <2.x); openclaw probes `openclaw --help` (refuses if the `run` subcommand isn't exposed). | The 2026-05-14 openclaw incident: driver assumed `openclaw run …` but OpenClaw 2026.5.7 renamed the subcommand to `openclaw agent`. Every chat after a runtime swap failed with bare `agent_error`. Now: `GET /config/drivers` returns health status; `PATCH /config/agents/{id}` blocks an unhealthy runtime swap with `422 driver_unavailable` carrying the actionable error + remediation. |
+| Wedge detector | **Dual-signal** — flags `agent_wedged=true` only when BOTH `last_heartbeat` AND `agent_last_frame_at` are stale ≥5 min | v1.3.1 was heartbeat-only — flipped wedged on order `0bac4215` while the agent was actively answering chat, because the heartbeat sender was broken but frames were flowing. Recovery now logs `alive_via: "heartbeat" \| "agent_frame"` so operators can see which plane carried the heal. |
+| Process-group abort | `detached: true` spawn + `process.kill(-pid, "SIGTERM")` + 2-second SIGKILL escalation | Stop button used to only kill the runtime leader. Subprocesses (Bash, file ops, npm installs) orphaned and kept streaming back. Now the whole tree dies. |
+| Chat hard-cap | `OSMODA_CHAT_HARD_CAP_MS = 8h` default (was hardcoded 10 min) | Long-running tasks (multi-hour scrapes, full app scaffolds) were getting SIGKILL'd at 10 min. Env-overridable. |
+| Network bind | Gateway defaults to `127.0.0.1:18789` (was `0.0.0.0`) | Public reach is through the spawn-server SSH proxy; gateways shouldn't listen on public IPs without explicit operator opt-in. |
+| install.sh | OpenClaw binary installed on every spawn (was: only when `--runtime=openclaw`) | Engine-tab runtime swap always lands on a present binary; no more "missing CLI" surprises. |
 
 ## Maturity Levels
 
@@ -71,14 +84,14 @@ Last updated: 2026-05-06
 | Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
-| Spawn API version | 1.2.7 |
-| osmoda-gateway version | 0.2.0 |
+| Spawn API version | 1.3.1 (latest documented; spawn-app internal at v1.3.30) |
+| osmoda-gateway version | 0.2.1 |
 
 ---
 
 ## Rust Crates
 
-### agentd — System Bridge Daemon
+### agentd - System Bridge Daemon
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -103,7 +116,7 @@ Last updated: 2026-05-06
 | FTS5 search | **Solid** | Porter stemming, BM25 ranking, auto-sync trigger, backfill migration; 5 tests |
 | **Tests** | **48** | agent card, incidents, backup, hash chain, FTS5, discovery, memory recall, approval, sandbox, input validation |
 
-### osmoda-keyd — Crypto Wallet Daemon
+### osmoda-keyd - Crypto Wallet Daemon
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -120,12 +133,12 @@ Last updated: 2026-05-06
 | Socket authentication | **Known limitation** | File permissions only (0o600); no token-based auth |
 | **Tests** | **35** | sign/verify ETH+SOL, keccak256, encryption, KDF consistency, decimal policy, delete, persistence, cache eviction, label limit, tx building |
 
-### osmoda-watch — SafeSwitch + Watchers
+### osmoda-watch - SafeSwitch + Watchers
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
 | SwitchSession state machine | **Solid** | Probation → Committed / RolledBack; 3 tests |
-| Health checks | **Functional** | SystemdUnit, TcpPort, HttpGet, Command — all execute real commands |
+| Health checks | **Functional** | SystemdUnit, TcpPort, HttpGet, Command - all execute real commands |
 | Auto-rollback | **Functional** | Calls `nix-env --rollback` + `switch-to-configuration switch` |
 | `/switch/begin` | **Functional** | Records session; caller must apply the NixOS change first (by design) |
 | Watcher escalation | **Functional** | restart → rollback → notify ladder; retries tracked |
@@ -134,7 +147,7 @@ Last updated: 2026-05-06
 | Input validation | **Solid** | Command path validation, arg metachar rejection, unit name sanitization; 12 tests |
 | **Tests** | **27** | state machine, persistence, health checks, input validation, fleet coordination, watcher roundtrip |
 
-### osmoda-routines — Background Automation
+### osmoda-routines - Background Automation
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -150,7 +163,7 @@ Last updated: 2026-05-06
 | Persistence | **Solid** | Saves/loads routines as JSON; 2 tests |
 | **Tests** | **17** | cron parser (6), persistence (2), validation (7), command timeout (1), defaults (1) |
 
-### osmoda-voice — Voice Pipeline (100% Local)
+### osmoda-voice - Voice Pipeline (100% Local)
 
 All processing on-device. No cloud. No tracking. No data leaves the machine.
 
@@ -168,14 +181,14 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | NixOS service | **Functional** | systemd unit with whisper.cpp + piper-tts; requires PipeWire |
 | **Tests** | **4** | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
 
-### osmoda-mesh — P2P Encrypted Daemon
+### osmoda-mesh - P2P Encrypted Daemon
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
 | Ed25519 identity | **Solid** | Signing key generation + persistence (0o600), zeroize on Drop; tested |
 | X25519 static key | **Solid** | Generated via `snow::Builder`, saved with public key; tested |
 | ML-KEM-768 keypair | **Solid** | FIPS 203 (via `ml-kem` crate), encapsulate/decapsulate roundtrip tested |
-| instance_id | **Solid** | `hex(SHA-256(noise_static_pubkey))[..32]` — deterministic, content-addressed; tested |
+| instance_id | **Solid** | `hex(SHA-256(noise_static_pubkey))[..32]` - deterministic, content-addressed; tested |
 | Identity signature | **Solid** | Ed25519 sign over canonical JSON; tampered-signature rejection tested |
 | Noise_XX handshake | **Solid** | `snow` crate, 3-message XX (X25519/ChaChaPoly/BLAKE2s), in-memory pipe test |
 | ML-KEM PQ exchange | **Solid** | Post-Noise encapsulation inside encrypted tunnel; both directions |
@@ -201,9 +214,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Audit logging | **Functional** | Logs to agentd ledger: connect, disconnect, message send/receive, health reports, alerts, DMs, room messages |
 | NixOS service | **Functional** | systemd unit, TCP 18800, hardening directives, state dir 0700 |
 | **Tests** | **44** | identity, handshake, messages, chat DM + room_id, invite, peers, transport, rooms, gossip, reconnect |
-| **Known limitation** | — | No persistent transport state across restarts — peers must re-invite after daemon restart |
+| **Known limitation** | - | No persistent transport state across restarts - peers must re-invite after daemon restart |
 
-### osmoda-egress — Egress Proxy
+### osmoda-egress - Egress Proxy
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -211,7 +224,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Capability tokens | **Planned** | Currently uses static allowlist, not per-request tokens |
 | **Tests** | **0** | No tests |
 
-### osmoda-mcpd — MCP Server Manager
+### osmoda-mcpd - MCP Server Manager
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -226,7 +239,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | NixOS service | **Functional** | systemd unit, depends on agentd + egress |
 | **Tests** | **8** | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
 
-### osmoda-teachd — System Learning & Self-Optimization
+### osmoda-teachd - System Learning & Self-Optimization
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -247,7 +260,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | NixOS service | **Functional** | systemd unit, depends on agentd, Restart=on-failure |
 | **Tests** | **22** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning), skillgen (7: slug, name, overlap, confidence, skill_md, path_traversal) |
 
-### agentctl — CLI Tool
+### agentctl - CLI Tool
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -300,7 +313,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 ## App Management (Bridge Tools)
 
-App process management via `systemd-run` transient units. No new Rust daemon — 6 bridge tools call systemd directly. JSON registry provides boot persistence.
+App process management via `systemd-run` transient units. No new Rust daemon - 6 bridge tools call systemd directly. JSON registry provides boot persistence.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -391,13 +404,13 @@ cargo test --workspace
 | osmoda-mesh | 44 | Identity (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite (3), peers (3), reconnect (2), rooms (3), gossip (3), transport (5), health (3), wire framing (5) |
 | osmoda-mcpd | 8 | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
 | osmoda-teachd | 22 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5), skillgen (7: slug, name, overlap, confidence, skill_md, path_traversal) |
-| agentctl | 0 | — |
-| osmoda-egress | 0 | — |
+| agentctl | 0 | - |
+| osmoda-egress | 0 | - |
 | **Total** | **205** | **All pass** |
 
 ---
 
-## spawn.os.moda — Hosted Provisioning
+## spawn.os.moda - Hosted Provisioning
 
 Separate private repo. Not part of the open source OS. Visit [spawn.os.moda](https://spawn.os.moda) to deploy a managed osModa server.
 
@@ -415,7 +428,7 @@ Redesigned single-column layout with tabbed interface (Overview / Chat / Setting
 | Tool servers card | **Functional** | MCP server list with status, PID, uptime; conditional |
 | Chat tab | **Functional** | Horizontal activity bar (replaces old sidebar), Claude-like rounded input with circular send button, no-bubble agent messages, user messages as accent bubbles, activity dropdown, markdown rendering (code blocks, lists, headers, links, blockquotes) |
 | Markdown rendering | **Functional** | Fenced code blocks with syntax highlighting, inline code, headers, bold/italic, ordered/unordered lists, links, blockquotes |
-| Responsive layout | **Functional** | Removed right sidebar column entirely — everything single-column flow |
+| Responsive layout | **Functional** | Removed right sidebar column entirely - everything single-column flow |
 
 ### v1 Programmatic API
 
@@ -425,7 +438,7 @@ spec/SDK/CHANGELOG synced. **v1.2.2** (2026-04-30): spec-kit baked into every sp
 `GET /api/v1/spec-kit/projects`; agent-card capability flags + `runtimes[].supported_auth_types`;
 claude-opus-4-7 as default Anthropic Opus. **v1.2.1** (2026-04-29): install-failure visibility
 (`install_failed` status, `install_error` field, `provision_steps[]`, server-side callbacks).
-**v1.2.0** (2026-04-18): modular runtime + per-server credentials/agents management —
+**v1.2.0** (2026-04-18): modular runtime + per-server credentials/agents management -
 see `apps/spawn/CHANGELOG.md`. **v1.1.0** (2026-04-17): idempotency, structured errors,
 token lifecycle, WS hardening.
 
@@ -437,30 +450,30 @@ token lifecycle, WS hardening.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| Agent Card (`/.well-known/agent-card.json`) | **Solid** | A2A + ERC-8004 — protocols array, chainId per payment method, semver **1.2.3**, `runtimes[].supported_auth_types`, capability flags incl. `spec_driven_development`, `install_failure_visibility`, `network_mode` |
+| Agent Card (`/.well-known/agent-card.json`) | **Solid** | A2A + ERC-8004 - protocols array, chainId per payment method, semver **1.2.3**, `runtimes[].supported_auth_types`, capability flags incl. `spec_driven_development`, `install_failure_visibility`, `network_mode` |
 | `GET /api/v1/plans` | **Solid** | Plan list with x402 pricing, regions, network mode |
 | `POST /api/v1/spawn/:planId` | **Solid** | x402-gated spawn. **Idempotency-Key** pre-check runs BEFORE x402 middleware → retries never re-pay |
 | `GET /api/v1/status/:orderId` | **Solid** | Basic status free; full details require Bearer `osk_`; enforces token expiry/revoke |
 | `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
 | `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
 | `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
-| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.7** — 19 paths, 19 schemas, two security schemes. Tags: Plans, Spawn, Status, Chat (WebSocket), Tokens, Docs, Callbacks, Standards, Spec-Kit, Streaming chat (dashboard), Agent control (dashboard). `redocly lint` 0 errors. |
-| Wedge detector | **Solid** | v1.2.7 — runs every 60 s. Flips `agent_wedged:true` on stale-heartbeat running orders. Auto-kicks restart. |
-| sshExec auto-recovery | **Solid** | v1.2.7 — Hetzner `reset_password` fallback when PAM blocks. Recovers legacy stuck servers without delete+respawn. |
-| osmoda-pam-self-heal.service | **Solid** | v1.2.7 — installed by install.sh on every spawn. Boot-time idempotent chage fix. Survives base-image regressions. |
-| `POST /agents/:agent/restart` | **Solid** | v1.2.6 — managed restart for wedged agents. SSH `systemctl restart osmoda-gateway`, poll for heartbeat. 60 s budget. `fallback_recommendation: "delete_and_respawn"` set when SSH blocked by legacy PAM bug. |
-| `GET /agents/:agent/restart/:rid` | **Solid** | v1.2.6 — poll restart status. In-memory record, 30 min TTL. |
-| `agent_responsive` field | **Solid** | v1.2.6 — derived from heartbeat staleness (90 s window). Lets integrators warn before the 120 s timeout. Companion `last_responsive_at`. |
-| `POST /api/dashboard/servers/:id/chat-async` | **Solid** | v1.2.5 — returns 202 with `{conversation_id, message_id}`. Single-user concurrency (409 on overlap). Empty-reply mode → `error` event with `code:agent_silent`. |
-| `GET /chat-stream/:conversation_id` | **Solid** | v1.2.5 — SSE, cursor-resumable, 15 s keepalive, 30 min hard cap, 410 on cursor past terminal. NDJSON file is the source of truth for live + cold replay. |
-| `GET /chat-history/:conversation_id` | **Solid** | v1.2.5 — JSON cold load. 48 h retention sweep. |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 **v1.2.7** - 19 paths, 19 schemas, two security schemes. Tags: Plans, Spawn, Status, Chat (WebSocket), Tokens, Docs, Callbacks, Standards, Spec-Kit, Streaming chat (dashboard), Agent control (dashboard). `redocly lint` 0 errors. |
+| Wedge detector | **Solid** | v1.2.7 - runs every 60 s. Flips `agent_wedged:true` on stale-heartbeat running orders. Auto-kicks restart. |
+| sshExec auto-recovery | **Solid** | v1.2.7 - cloud provider `reset_password` fallback when PAM blocks. Recovers legacy stuck servers without delete+respawn. |
+| osmoda-pam-self-heal.service | **Solid** | v1.2.7 - installed by install.sh on every spawn. Boot-time idempotent chage fix. Survives base-image regressions. |
+| `POST /agents/:agent/restart` | **Solid** | v1.2.6 - managed restart for wedged agents. SSH `systemctl restart osmoda-gateway`, poll for heartbeat. 60 s budget. `fallback_recommendation: "delete_and_respawn"` set when SSH blocked by legacy PAM bug. |
+| `GET /agents/:agent/restart/:rid` | **Solid** | v1.2.6 - poll restart status. In-memory record, 30 min TTL. |
+| `agent_responsive` field | **Solid** | v1.2.6 - derived from heartbeat staleness (90 s window). Lets integrators warn before the 120 s timeout. Companion `last_responsive_at`. |
+| `POST /api/dashboard/servers/:id/chat-async` | **Solid** | v1.2.5 - returns 202 with `{conversation_id, message_id}`. Single-user concurrency (409 on overlap). Empty-reply mode → `error` event with `code:agent_silent`. |
+| `GET /chat-stream/:conversation_id` | **Solid** | v1.2.5 - SSE, cursor-resumable, 15 s keepalive, 30 min hard cap, 410 on cursor past terminal. NDJSON file is the source of truth for live + cold replay. |
+| `GET /chat-history/:conversation_id` | **Solid** | v1.2.5 - JSON cold load. 48 h retention sweep. |
 | `GET /api/v1/spec-kit/projects` | **Functional** | Bearer-required. Aggregates spec-driven projects from heartbeat. Powers the per-server **Factories** dashboard tab. |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | Structured error envelope | **Solid** | `{code, message, detail?, request_id, error}` on every /api/v1/* + agent-card error; legacy `error` kept one release |
 | Request IDs | **Solid** | `X-Request-Id: req_<ulid>` on every response, prefixed into `[req_…]` log lines |
 | Token lifecycle | **Solid** | `tokens.enc` AES-256-GCM store; 1-year default TTL; lazy metadata for legacy tokens |
-| Per-token rate limits | **Solid** | spawn 10/h, status 120/min, chat 3 concurrent — all with `Retry-After` on 429 |
-| `@osmoda/client` TypeScript SDK | **Functional** | `packages/osmoda-client/` — handwritten to match `/api/v1/docs`; typechecks clean |
+| Per-token rate limits | **Solid** | spawn 10/h, status 120/min, chat 3 concurrent - all with `Retry-After` on 429 |
+| `@osmoda/client` TypeScript SDK | **Functional** | `packages/osmoda-client/` - handwritten to match `/api/v1/docs`; typechecks clean |
 | Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 90 tools |
 
 ### Heartbeat Pipeline
@@ -540,13 +553,13 @@ Stress test:           PASS (700/700 concurrent health checks, 50 concurrent que
 
 ## What's Next
 
-1. **Approval gate for destructive ops** — code-enforced confirmation before destructive operations (currently convention-based via agent prompt, not runtime-enforced). This is the #1 safety priority.
-2. **Tier 1/Tier 2 sandbox implementation** — enforce the trust tier model with bubblewrap isolation + egress proxy for third-party tools
-3. **End-to-end VM test** — boot the dev VM, verify all daemons start and communicate
-4. **Integration tests** — bridge → daemon → ledger pipeline tests
-5. **Wire semantic memory** — connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
-6. **Token-based socket auth** — capability tokens for fine-grained access control
-7. **Persistent mesh sessions** — save/restore transport state across daemon restarts
-8. **External security audit** — independent review of mesh crypto (Noise_XX + ML-KEM-768)
-9. **Real transaction building** — RLP encoding for ETH, Solana transaction structs (lower priority — not the core value prop)
-10. ~~**Web dashboard with live chat**~~ — DONE. Redesigned detail page: single-column layout, tabbed Overview/Chat/Settings, markdown rendering in chat, horizontal activity bar, collapsible sections
+1. **Approval gate for destructive ops** - code-enforced confirmation before destructive operations (currently convention-based via agent prompt, not runtime-enforced). This is the #1 safety priority.
+2. **Tier 1/Tier 2 sandbox implementation** - enforce the trust tier model with bubblewrap isolation + egress proxy for third-party tools
+3. **End-to-end VM test** - boot the dev VM, verify all daemons start and communicate
+4. **Integration tests** - bridge → daemon → ledger pipeline tests
+5. **Wire semantic memory** - connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
+6. **Token-based socket auth** - capability tokens for fine-grained access control
+7. **Persistent mesh sessions** - save/restore transport state across daemon restarts
+8. **External security audit** - independent review of mesh crypto (Noise_XX + ML-KEM-768)
+9. **Real transaction building** - RLP encoding for ETH, Solana transaction structs (lower priority - not the core value prop)
+10. ~~**Web dashboard with live chat**~~ - DONE. Redesigned detail page: single-column layout, tabbed Overview/Chat/Settings, markdown rendering in chat, horizontal activity bar, collapsible sections

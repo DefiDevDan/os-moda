@@ -26,9 +26,9 @@ function ok(res: ServerResponse, body: any, status = 200): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
-function err(res: ServerResponse, status: number, code: string, message: string): void {
+function err(res: ServerResponse, status: number, code: string, message: string, detail?: Record<string, any>): void {
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ code, message, error: code }));
+  res.end(JSON.stringify({ code, message, error: code, ...(detail || {}) }));
 }
 
 async function readJson(req: IncomingMessage): Promise<any> {
@@ -93,14 +93,34 @@ export async function handleConfigRequest(
   try {
     // ── Drivers (read-only) ──────────────────────────────────────────────
     if (url.pathname === "/config/drivers" && req.method === "GET") {
-      const drivers = listDrivers().map((d) => ({
-        name: d.name,
-        display_name: d.displayName,
-        description: d.description,
-        supported_providers: d.supportedProviders,
-        supported_auth_types: d.supportedAuthTypes,
-        default_models: d.defaultModels,
-      }));
+      // healthCheck() in parallel — each driver probe is <5s, total ~5s worst case.
+      // Results are surfaced verbatim to the dashboard Engine tab so operators
+      // see "openclaw unavailable: needs CLI port" before they swap.
+      const drivers = await Promise.all(
+        listDrivers().map(async (d) => {
+          const probed_at = new Date().toISOString();
+          let health: any = { available: true, probed_at };
+          try {
+            const result = await d.healthCheck();
+            health = { ...result, probed_at };
+          } catch (e: any) {
+            health = {
+              available: false,
+              error: `healthCheck threw: ${e?.message || String(e)}`,
+              probed_at,
+            };
+          }
+          return {
+            name: d.name,
+            display_name: d.displayName,
+            description: d.description,
+            supported_providers: d.supportedProviders,
+            supported_auth_types: d.supportedAuthTypes,
+            default_models: d.defaultModels,
+            health,
+          };
+        }),
+      );
       ok(res, { drivers });
       return true;
     }
@@ -210,12 +230,29 @@ export async function handleConfigRequest(
         !a.id || !a.runtime || !a.model || typeof a.enabled !== "boolean");
       if (bad) return err(res, 400, "validation_failed", "agent missing required fields"), true;
       const creds = loadCredentials().credentials;
+      // Probe each distinct runtime in the PUT body once, then reject the whole
+      // PUT if any agent enabled+pointed at an unhealthy driver.
+      const runtimes = Array.from(new Set((body.agents as AgentProfile[]).filter((a) => a.enabled).map((a) => a.runtime)));
+      const healthByRuntime: Record<string, any> = {};
+      for (const rn of runtimes) {
+        const d = getDriver(rn);
+        if (!d) return err(res, 400, "validation_failed", `unknown runtime ${rn}`), true;
+        try { healthByRuntime[rn] = await d.healthCheck(); }
+        catch (e: any) { healthByRuntime[rn] = { available: false, error: `healthCheck threw: ${e?.message || String(e)}` }; }
+      }
       for (const a of body.agents as AgentProfile[]) {
         if (a.credential_id && !creds.some((c) => c.id === a.credential_id)) {
           return err(res, 400, "validation_failed", `credential ${a.credential_id} not found`), true;
         }
         if (!getDriver(a.runtime)) {
           return err(res, 400, "validation_failed", `unknown runtime ${a.runtime}`), true;
+        }
+        if (a.enabled && healthByRuntime[a.runtime] && !healthByRuntime[a.runtime].available) {
+          return err(
+            res, 422, "driver_unavailable",
+            `Agent '${a.id}' is enabled but runtime '${a.runtime}' is unavailable: ${healthByRuntime[a.runtime].error || "unknown"}`,
+            { agent_id: a.id, runtime: a.runtime, health: healthByRuntime[a.runtime] },
+          ), true;
         }
         if (a.profile_dir && !isAllowedProfilePath(a.profile_dir)) {
           return err(res, 400, "validation_failed", `profile_dir must be under /var/lib/osmoda/ (agent ${a.id})`), true;
@@ -255,6 +292,28 @@ export async function handleConfigRequest(
       if ("system_prompt_file" in body && body.system_prompt_file != null
           && !isAllowedProfilePath(body.system_prompt_file)) {
         return err(res, 400, "validation_failed", "system_prompt_file must be under /var/lib/osmoda/"), true;
+      }
+      // Pre-flight: if the caller is changing runtime, probe the target driver
+      // first. Caught the 2026-05-14 openclaw incident where the driver assumed
+      // an old CLI shape and every chat after the swap died with `agent_error`.
+      // Blocking at swap time gives a clear actionable error instead.
+      if ("runtime" in body && body.runtime && body.runtime !== agent.runtime) {
+        const targetDriver = getDriver(body.runtime);
+        if (!targetDriver) {
+          return err(res, 400, "validation_failed", `unknown runtime ${body.runtime}`), true;
+        }
+        let health: any;
+        try { health = await targetDriver.healthCheck(); }
+        catch (e: any) {
+          health = { available: false, error: `healthCheck threw: ${e?.message || String(e)}` };
+        }
+        if (!health.available) {
+          return err(
+            res, 422, "driver_unavailable",
+            `Cannot switch agent '${id}' to runtime '${body.runtime}': ${health.error || "driver unhealthy"}`,
+            { runtime: body.runtime, health },
+          ), true;
+        }
       }
       for (const k of ["runtime", "credential_id", "model", "display_name", "enabled", "channels", "profile_dir", "system_prompt_file"]) {
         if (k in body) (agent as any)[k] = body[k];

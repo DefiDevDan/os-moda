@@ -23,6 +23,7 @@ import type {
   AgentEvent,
   Credential,
   CredentialTestResult,
+  DriverHealthResult,
 } from "./types.js";
 
 const OPENCLAW_CANDIDATES = [
@@ -70,6 +71,69 @@ export const openClawDriver: RuntimeDriver = {
   supportedProviders: ["anthropic", "openai"],
   supportedAuthTypes: ["api_key"],
   defaultModels: ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "gpt-5"],
+
+  async healthCheck(): Promise<DriverHealthResult> {
+    // Probe the openclaw binary AND verify the CLI shape this driver depends on.
+    //
+    // Historical incident (2026-05-14): the driver was written against an
+    // older OpenClaw that exposed `openclaw run --agent X --message Y`. The
+    // installed binary at the time was OpenClaw 2026.5.7 which had renamed
+    // the subcommand to `openclaw agent` (with a different option set and a
+    // mandatory `openclaw agents add` registration step). Every chat through
+    // openclaw failed with "Unknown command: openclaw run" but the gateway
+    // surfaced it as a bare `agent_error`. The probe below detects this
+    // class of CLI drift so the driver fails LOUD at runtime-selection time
+    // instead of silently at chat time.
+    const bin = findOpenClawBinary();
+    if (!bin) {
+      return {
+        available: false,
+        error: "openclaw binary not installed on this host",
+        remediation:
+          "Install: mkdir -p /opt/openclaw && cd /opt/openclaw && " +
+          "npm install openclaw && ln -sf /opt/openclaw/node_modules/.bin/openclaw /usr/local/bin/openclaw",
+      };
+    }
+    const { code, stdout, stderr } = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (resolve) => {
+        const proc = spawn(bin, ["--help"], { stdio: ["ignore", "pipe", "pipe"] });
+        let so = "", se = "";
+        proc.stdout?.on("data", (d) => { so += d.toString(); });
+        proc.stderr?.on("data", (d) => { se += d.toString(); });
+        proc.on("close", (c) => resolve({ code: c, stdout: so, stderr: se }));
+        setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} ; resolve({ code: 124, stdout: so, stderr: se }); }, 5000);
+      },
+    );
+    if (code !== 0) {
+      return {
+        available: false,
+        error: `'${bin} --help' exited ${code}: ${(stderr || stdout).trim().slice(0, 200)}`,
+        remediation: "Reinstall: cd /opt/openclaw && npm install openclaw",
+      };
+    }
+    // Extract version. Output begins "🦞 OpenClaw 2026.5.7 (eeef486) — …".
+    const versionMatch = stdout.match(/OpenClaw\s+([\d.]+(?:[-+][\w.]+)?)/);
+    const version = versionMatch ? `OpenClaw ${versionMatch[1]}` : undefined;
+    // The driver in this file currently invokes `openclaw run …`. Reject if the
+    // installed binary doesn't expose that exact subcommand. The 2026.5+ line
+    // renamed it to `openclaw agent` — driver porting is on the v1.4 roadmap.
+    const hasRun = /^\s+run\b/m.test(stdout) || /^Commands:[\s\S]*\brun\b/m.test(stdout);
+    if (!hasRun) {
+      return {
+        available: false,
+        version,
+        error:
+          `Installed ${version || "openclaw"} does not expose the 'openclaw run' subcommand ` +
+          `that this driver invokes. The 2026.5.x line renamed it to 'openclaw agent' with a ` +
+          `different option set and a mandatory 'openclaw agents add' registration step.`,
+        remediation:
+          "Use the claude-code runtime for now. The openclaw driver is being rewritten for the " +
+          "2026.5+ CLI; track progress at https://github.com/bolivian-peru/os-moda/issues " +
+          "(label: openclaw-driver-port).",
+      };
+    }
+    return { available: true, version };
+  },
 
   async testCredential(cred: Credential): Promise<CredentialTestResult> {
     if (cred.type !== "api_key") {

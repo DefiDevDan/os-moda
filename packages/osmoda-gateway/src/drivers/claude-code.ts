@@ -27,6 +27,7 @@ import type {
   AgentEvent,
   Credential,
   CredentialTestResult,
+  DriverHealthResult,
 } from "./types.js";
 
 function findClaudeBinary(): string {
@@ -66,6 +67,56 @@ export const claudeCodeDriver: RuntimeDriver = {
   supportedProviders: ["anthropic"],
   supportedAuthTypes: ["oauth", "api_key"],
   defaultModels: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+
+  async healthCheck(): Promise<DriverHealthResult> {
+    // Probe `claude --version`. The 2.x CLI prints e.g. "2.1.118 (Claude Code)"
+    // to stdout. Anything else (missing binary, wrong version string) means
+    // the driver isn't safe to use — block the runtime selection.
+    const bin = findClaudeBinary();
+    try { fs.accessSync(bin, fs.constants.X_OK); }
+    catch {
+      return {
+        available: false,
+        error: `claude binary not found at '${bin}'`,
+        remediation:
+          "Install: cd /opt/osmoda/packages/osmoda-gateway && npm install && " +
+          "ln -sf node_modules/.bin/claude /usr/local/bin/claude",
+      };
+    }
+    const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (resolve) => {
+        const proc = spawn(bin, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "", stderr = "";
+        proc.stdout?.on("data", (d) => { stdout += d.toString(); });
+        proc.stderr?.on("data", (d) => { stderr += d.toString(); });
+        proc.on("close", (code) => resolve({ code, stdout, stderr }));
+        setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} ; resolve({ code: 124, stdout, stderr }); }, 5000);
+      },
+    );
+    if (out.code !== 0) {
+      return {
+        available: false,
+        error: `'${bin} --version' exited ${out.code}: ${(out.stderr || out.stdout).trim().slice(0, 200)}`,
+        remediation: "Reinstall the claude-code CLI (npm i @anthropic-ai/claude-code).",
+      };
+    }
+    const version = out.stdout.trim().split("\n")[0] || undefined;
+    // The 2.x CLI's `--version` shape: "2.1.118 (Claude Code)". The 0.2.x line
+    // does NOT use `--print --stream-json --resume` the same way and our driver
+    // would not work against it. Refuse < 2.0.
+    const major = version ? parseInt(version.split(".")[0] || "0", 10) : 0;
+    if (major < 2) {
+      return {
+        available: false,
+        version,
+        error: `claude-code driver requires claude CLI >= 2.x (got ${version || "unknown"})`,
+        remediation:
+          "Upgrade: npm install -g @anthropic-ai/claude-code@^2.1.75 " +
+          "(or `cd /opt/osmoda/packages/osmoda-gateway && npm install`).",
+      };
+    }
+    return { available: true, version };
+  },
 
   async testCredential(cred: Credential): Promise<CredentialTestResult> {
     if (cred.provider !== "anthropic") {

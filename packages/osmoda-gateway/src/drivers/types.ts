@@ -64,6 +64,35 @@ export interface CredentialTestResult {
   model_list?: string[];
 }
 
+/**
+ * Result of probing whether a driver's underlying binary/SDK is installed and
+ * has the expected CLI shape. Caught the OpenClaw 2026.5.7 incident where the
+ * driver assumed `openclaw run` but the installed binary only exposed
+ * `openclaw agent` — every chat through openclaw failed silently with
+ * "Unknown command" until we added this probe.
+ *
+ * Each driver implements healthCheck() and the gateway calls it:
+ *   - on /config/drivers list  (surfaces a status badge in the dashboard)
+ *   - before any PATCH /config/agents/{id} that changes runtime (blocks the
+ *     swap with a clear 422 instead of letting chat fail later)
+ *   - on startup (logs warnings for any unavailable driver)
+ */
+export interface DriverHealthResult {
+  /** True if the driver can spawn a working session with proper credentials. */
+  available: boolean;
+  /** Driver-reported version string when available, e.g. "OpenClaw 2026.5.7". */
+  version?: string;
+  /** Human-readable reason when `available: false`. */
+  error?: string;
+  /**
+   * Optional remediation hint shown to operators in the dashboard, e.g.
+   * "Reinstall: cd /opt/openclaw && npm install openclaw".
+   */
+  remediation?: string;
+  /** ISO timestamp of when the probe ran. Filled in by the gateway. */
+  probed_at?: string;
+}
+
 export interface RuntimeDriver {
   readonly name: string;
   readonly displayName: string;
@@ -74,6 +103,14 @@ export interface RuntimeDriver {
 
   /** Non-destructive — should succeed with a 1-token ping or equivalent cheap check. */
   testCredential(cred: Credential): Promise<CredentialTestResult>;
+
+  /**
+   * Probe whether the driver's binary is installed and has the CLI shape we
+   * expect. MUST be cheap (no API calls, no network), MUST be idempotent,
+   * MUST NOT spawn an agent turn. Typical implementation: spawn the binary
+   * with `--version` or `--help` and pattern-match the output.
+   */
+  healthCheck(): Promise<DriverHealthResult>;
 
   startSession(opts: DriverSessionOpts): AsyncGenerator<AgentEvent>;
 }

@@ -776,6 +776,31 @@ if ! command -v openclaw &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
+# CodeGraph — pre-indexed code knowledge graph (MCP server). Optional but on
+# by default: gives the agent codegraph_search/context/callers/callees/impact/
+# node/explore/files/status — ~90% fewer grep/Read tool calls on code tasks.
+# Pure-WASM (tree-sitter + sqlite), 100% local, MIT, security-audited 2026-05-20
+# (no install hooks, no network, path-traversal-guarded). Wired into the gateway
+# MCP config via the OSMODA_CODEGRAPH_ENABLED=1 env flag set below — we do NOT
+# run codegraph's own installer (which would rewrite ~/.claude.json).
+# ---------------------------------------------------------------------------
+log "Installing CodeGraph (code-intelligence MCP server)..."
+if ! command -v codegraph &>/dev/null; then
+  if npm install -g @colbymchenry/codegraph 2>&1 | tail -2; then
+    log "CodeGraph installed ($(codegraph --version 2>/dev/null | head -1 || echo '?'))"
+  else
+    warn "CodeGraph install failed (network / registry) — agent still works without it; retry: npm install -g @colbymchenry/codegraph"
+  fi
+fi
+# Enable the codegraph MCP server in the gateway env (idempotent).
+GATEWAY_ENV_FILE="$STATE_DIR/config/env"
+if command -v codegraph &>/dev/null; then
+  mkdir -p "$(dirname "$GATEWAY_ENV_FILE")"
+  grep -q "OSMODA_CODEGRAPH_ENABLED" "$GATEWAY_ENV_FILE" 2>/dev/null || \
+    echo "OSMODA_CODEGRAPH_ENABLED=1" >> "$GATEWAY_ENV_FILE"
+fi
+
+# ---------------------------------------------------------------------------
 # Step 6: Set up tool bridge
 # ---------------------------------------------------------------------------
 report_progress "openclaw" "done" "Both runtimes installed (default=$RUNTIME, openclaw available via dashboard)"

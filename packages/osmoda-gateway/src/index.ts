@@ -61,24 +61,41 @@ function loadGatewayEnv(): GatewayEnv {
 // ── MCP config (per-agent, because paths may differ per profile) ────────
 
 function buildMcpConfig(mcpBridgePath: string): object {
-  return {
-    mcpServers: {
-      osmoda: {
-        command: "node",
-        args: [mcpBridgePath],
-        env: {
-          AGENTD_SOCKET: process.env.OSMODA_SOCKET || "/run/osmoda/agentd.sock",
-          KEYD_SOCKET: process.env.OSMODA_KEYD_SOCKET || "/run/osmoda/keyd.sock",
-          WATCH_SOCKET: process.env.OSMODA_WATCH_SOCKET || "/run/osmoda/watch.sock",
-          ROUTINES_SOCKET: process.env.OSMODA_ROUTINES_SOCKET || "/run/osmoda/routines.sock",
-          MESH_SOCKET: process.env.OSMODA_MESH_SOCKET || "/run/osmoda/mesh.sock",
-          MCPD_SOCKET: process.env.OSMODA_MCPD_SOCKET || "/run/osmoda/mcpd.sock",
-          TEACHD_SOCKET: process.env.OSMODA_TEACHD_SOCKET || "/run/osmoda/teachd.sock",
-          VOICE_SOCKET: process.env.OSMODA_VOICE_SOCKET || "/run/osmoda/voice.sock",
-        },
+  const servers: Record<string, unknown> = {
+    osmoda: {
+      command: "node",
+      args: [mcpBridgePath],
+      env: {
+        AGENTD_SOCKET: process.env.OSMODA_SOCKET || "/run/osmoda/agentd.sock",
+        KEYD_SOCKET: process.env.OSMODA_KEYD_SOCKET || "/run/osmoda/keyd.sock",
+        WATCH_SOCKET: process.env.OSMODA_WATCH_SOCKET || "/run/osmoda/watch.sock",
+        ROUTINES_SOCKET: process.env.OSMODA_ROUTINES_SOCKET || "/run/osmoda/routines.sock",
+        MESH_SOCKET: process.env.OSMODA_MESH_SOCKET || "/run/osmoda/mesh.sock",
+        MCPD_SOCKET: process.env.OSMODA_MCPD_SOCKET || "/run/osmoda/mcpd.sock",
+        TEACHD_SOCKET: process.env.OSMODA_TEACHD_SOCKET || "/run/osmoda/teachd.sock",
+        VOICE_SOCKET: process.env.OSMODA_VOICE_SOCKET || "/run/osmoda/voice.sock",
       },
     },
   };
+
+  // v0.2.2 — Optional CodeGraph MCP server (pre-indexed code knowledge graph,
+  // colbymchenry/codegraph, MIT, WASM tree-sitter + SQLite, 100% local).
+  // Gives the agent codegraph_search/context/callers/callees/impact/node/
+  // files/explore/status — ~90% fewer grep/Read tool calls on code tasks.
+  // Gated on OSMODA_CODEGRAPH_ENABLED so a box without the binary installed
+  // doesn't carry a dead server entry under claude-code's --strict-mcp-config.
+  // Security-audited 2026-05-20: no install hooks, no network, no eval,
+  // path-traversal-guarded, static tool descriptions. We never run codegraph's
+  // own installer (which would rewrite ~/.claude.json) — this config IS the
+  // wiring, and we leave git-hooks off (file-watcher only).
+  if (process.env.OSMODA_CODEGRAPH_ENABLED === "1") {
+    servers.codegraph = {
+      command: process.env.OSMODA_CODEGRAPH_BIN || "codegraph",
+      args: ["serve", "--mcp"],
+    };
+  }
+
+  return { mcpServers: servers };
 }
 
 let _mcpConfigPath: string | null = null;

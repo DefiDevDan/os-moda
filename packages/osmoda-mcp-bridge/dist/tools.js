@@ -504,10 +504,19 @@ export function getAllTools() {
                     let skills = [];
                     try { skills = fs.readdirSync(skillsDir).filter(d => d.startsWith("speckit-")); } catch { /* no skills dir */ }
                     agentd("POST", "/memory/ingest", { event: { category: "spec-kit", subcategory: "init", actor: "mcp.agent", summary: `Scaffolded ${slug}`, metadata: { project_path: projectPath, integration: integ, skills_count: skills.length } } }).catch(() => { });
+                    // Phase 3 — seed the code knowledge graph for this project so the
+                    // agent has structure awareness from the first implement turn.
+                    // Best-effort: codegraph may not be installed; never fail the scaffold.
+                    let codegraph_indexed = false;
+                    try {
+                        runShell(`command -v codegraph >/dev/null 2>&1 && codegraph init '${projectPath}' >/dev/null 2>&1 && codegraph index '${projectPath}' >/dev/null 2>&1 && echo ok`, 30_000);
+                        codegraph_indexed = true;
+                    } catch { /* codegraph absent or index failed — non-fatal */ }
                     return JSON.stringify({
                         project_path: projectPath,
                         integration: integ,
                         skills,
+                        codegraph_indexed,
                         next_action: skills.includes("speckit-constitution")
                             ? "Run spec_kit_run with command='constitution' to set governance, then 'specify' for the WHAT/WHY."
                             : "specify init returned no speckit-* skills — check /usr/local/bin/specify --version. Run install.sh --skip-spec-kit=false to repair.",
@@ -561,10 +570,20 @@ export function getAllTools() {
                     const out = runShell(claudeCmd, timeoutMs);
                     const durationSec = Math.round((Date.now() - startedAt) / 1000);
                     agentd("POST", "/memory/ingest", { event: { category: "spec-kit", subcategory: cmd, actor: "mcp.agent", summary: `${cmd} on ${path.basename(projPath)}`, metadata: { project: path.basename(projPath), command: cmd, prompt_prefix: prompt.slice(0, 80), duration_seconds: durationSec } } }).catch(() => { });
+                    // Phase 3 — code-writing phases (implement/tasks) change the source;
+                    // re-sync the knowledge graph so the next phase sees fresh structure.
+                    let codegraph_synced = false;
+                    if (cmd === "implement" || cmd === "tasks") {
+                        try {
+                            runShell(`command -v codegraph >/dev/null 2>&1 && (codegraph sync '${projPath}' >/dev/null 2>&1 || codegraph index '${projPath}' >/dev/null 2>&1) && echo ok`, 30_000);
+                            codegraph_synced = true;
+                        } catch { /* non-fatal */ }
+                    }
                     return JSON.stringify({
                         project_path: projPath,
                         command: cmd,
                         duration_seconds: durationSec,
+                        codegraph_synced,
                         output: String(out).slice(-15000), // last 15K chars; full log in /workspace/<proj>/.claude/...
                     }, null, 2);
                 } catch (e) {

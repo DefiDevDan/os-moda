@@ -798,6 +798,36 @@ if command -v codegraph &>/dev/null; then
   mkdir -p "$(dirname "$GATEWAY_ENV_FILE")"
   grep -q "OSMODA_CODEGRAPH_ENABLED" "$GATEWAY_ENV_FILE" 2>/dev/null || \
     echo "OSMODA_CODEGRAPH_ENABLED=1" >> "$GATEWAY_ENV_FILE"
+
+  # Phase 2 — auto-index osModa's own source + workspace + deployed apps, then
+  # keep them synced every 30 min via a systemd timer. Gives the agent a live
+  # code knowledge graph of everything it works on (incl. the OS itself).
+  install -D -m 0755 "$INSTALL_DIR/scripts/codegraph-index.sh" /opt/osmoda/bin/codegraph-index.sh 2>/dev/null || \
+    cp "$INSTALL_DIR/scripts/codegraph-index.sh" /opt/osmoda/bin/codegraph-index.sh 2>/dev/null || true
+  chmod +x /opt/osmoda/bin/codegraph-index.sh 2>/dev/null || true
+  cat > /etc/systemd/system/osmoda-codegraph-index.service <<'CGSVC'
+[Unit]
+Description=osModa CodeGraph index sync
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/osmoda/bin/codegraph-index.sh
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/run/current-system/sw/bin
+CGSVC
+  cat > /etc/systemd/system/osmoda-codegraph-index.timer <<'CGTMR'
+[Unit]
+Description=osModa CodeGraph index sync timer
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+AccuracySec=1min
+[Install]
+WantedBy=timers.target
+CGTMR
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl enable --now osmoda-codegraph-index.timer 2>/dev/null || true
+  # Kick an initial index now (best-effort, backgrounded so install isn't blocked)
+  ( /opt/osmoda/bin/codegraph-index.sh >/dev/null 2>&1 || true ) &
 fi
 
 # ---------------------------------------------------------------------------

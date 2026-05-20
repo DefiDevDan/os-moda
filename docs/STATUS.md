@@ -53,6 +53,17 @@ Last updated: 2026-05-06
 | Dashboard UI | Failure-state panel with phase + log + Rebuild / Heartbeat / Refund buttons | Operators no longer need SSH to diagnose stuck installs |
 | Spawn deploy.sh | `setsid` + explicit fd redirect to log file | Previous nohup-via-SSH was leaving fd 1/2 pointing at half-closed Unix sockets - log output silently dropped for hours |
 
+## Recent operational changes (2026-05-20)
+
+| Area | Change | Why |
+|---|---|---|
+| CodeGraph integration | New optional MCP server (colbymchenry/codegraph, MIT, pure-WASM). Gateway 0.2.1 → **0.2.2**. Env-gated `OSMODA_CODEGRAPH_ENABLED=1`. | Gives the agent `codegraph_*` (search/context/callers/callees/impact/node/explore/files/status) — a pre-indexed code knowledge graph, ~90% fewer grep/Read tool calls. Security-audited before integration (no install hooks, no network, path-traversal-guarded). |
+| CodeGraph auto-index | `scripts/codegraph-index.sh` + `osmoda-codegraph-index.timer` (30-min sync) index `/opt/osmoda`, `/workspace/*`, `/srv/*`. | The OS knows its own structure (self-modification awareness) + every workspace/app the agent touches. Verified: /opt/osmoda → 92 files, 1925 nodes, 598 functions in 7s. |
+| Spec-kit hooks | `spec_kit_init` runs codegraph init+index; `spec_kit_run implement/tasks` syncs the graph. | Spec-kit projects have structure awareness from the first implement turn. |
+| Heartbeat body limit | Per-route `express.json({limit:"1mb"})` on `/api/heartbeat` (was global 16kb). | Full heartbeat payloads (agents+apps+events+mesh) were 413'ing → `last_heartbeat` never updated → header falsely showed "stalled" on healthy agents. **Fleet-wide bug.** |
+| Header dual-signal | Server-detail header treats `chat_responsive===true` (fresh frame) as proof the agent works, overriding heartbeat-derived "stalled"/"no heartbeat". | Mirrors the wedge detector. A broken heartbeat sender no longer makes a working agent look dead. |
+| Server-detail UI | 3-column dense grid (was 2-col); Apps card redesigned into readable tiles with detail line + Open button. Main-page model switcher removed (Engine tab owns it). | Denser/clearer layout; one working model-switch path (4.6↔4.7 verified). |
+
 ## Recent operational changes (2026-05-19)
 
 | Area | Change | Why |
@@ -85,7 +96,7 @@ Last updated: 2026-05-06
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 | Spawn API version | 1.3.1 (latest documented; spawn-app internal at v1.3.30) |
-| osmoda-gateway version | 0.2.1 |
+| osmoda-gateway version | 0.2.2 |
 
 ---
 

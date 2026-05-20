@@ -6,7 +6,7 @@
 
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-10 Rust daemons. 91 structured tools. **Modular agent runtime** — swap between Claude Code (default) and OpenClaw without SSH or rebuilds. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+10 Rust daemons. 91 structured tools. **Modular agent runtime** — swap between Claude Code (default) and OpenClaw without SSH or rebuilds. **Pre-indexed code knowledge graph** (CodeGraph) so the agent navigates codebases — including the OS's own source — without grep-spraying. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
 > **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
@@ -544,7 +544,7 @@ skills/                     19 system skill definitions
 - 20 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 
-**What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).
+**What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, pre-indexed code knowledge graph (CodeGraph — `codegraph_search/context/impact/callers/callees/…`, auto-indexed across the OS source + workspaces + deployed apps), SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).
 
 **What's next:** Semantic memory engine (usearch + fastembed), external security audit of mesh crypto, end-to-end integration tests, WebRTC browser-to-server connections.
 

@@ -10,12 +10,13 @@ The sandbox exists for UNTRUSTED third-party tools, not for the agent itself.
 
 ## Current state
 
-- **osmoda-gateway** v0.2.1 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps)
-- **Spawn-app API** v1.3.x (latest documented v1.3.1; internal v1.3.30 with the chat persistence + watchdog + Engine UX work)
+- **osmoda-gateway** v0.2.2 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps, optional CodeGraph MCP server)
+- **Spawn-app API** v1.3.x (latest documented v1.3.1; internal ~v1.3.33 with chat persistence + watchdog + Engine UX + 3-col detail grid + heartbeat body-limit fix)
 - **Claude Code CLI** ^2.1.75 pin (refuses anything <2.x via gateway healthCheck)
 - **OpenClaw** installed on every spawn but `unavailable` until the driver is ported to OpenClaw 2026.5+ (renamed `run` → `agent`, needs `agents add` registration step). See `packages/osmoda-gateway/src/drivers/openclaw.ts` `healthCheck()` for the exact CLI-port gate.
+- **CodeGraph** (colbymchenry/codegraph, MIT, pure-WASM tree-sitter + SQLite) installed on every spawn as an optional MCP server (env-gated `OSMODA_CODEGRAPH_ENABLED=1`). Gives the agent `codegraph_search/context/callers/callees/impact/node/explore/files/status` — a pre-indexed code knowledge graph for ~90% fewer grep/Read calls. Auto-indexes `/opt/osmoda` (self-modification awareness), `/workspace/*` (spec-kit), `/srv/*` (deployed apps) via `osmoda-codegraph-index.timer` (30-min sync); spec-kit init/implement hook into it. Security-audited 2026-05-20. Full phased plan in `CODEGRAPH-INTEGRATION.md`.
 
-See [`docs/STATUS.md`](docs/STATUS.md) for full per-component maturity + the latest operational hardening (2026-05-19: gateway 0.2.1, dual-signal wedge detector, healthCheck infrastructure, process-group abort, 8h hard cap, 127.0.0.1 lockdown).
+See [`docs/STATUS.md`](docs/STATUS.md) for full per-component maturity + the latest operational hardening (2026-05-19→20: gateway 0.2.2, dual-signal wedge detector, healthCheck infrastructure, process-group abort, 8h hard cap, 127.0.0.1 lockdown, heartbeat body-limit fix, CodeGraph integration phases 1–3).
 
 ## Architecture (3 trust tiers)
 

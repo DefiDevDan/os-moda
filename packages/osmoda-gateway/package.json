@@ -1,7 +1,7 @@
 {
   "name": "osmoda-gateway",
-  "version": "0.2.3",
-  "description": "osModa Gateway — modular runtime (claude-code + openclaw 2026.5+ drivers), disk-persisted runtime-tagged sessions, healthCheck-gated swaps, per-assistant-message text de-dup, tool-target hints, 92 MCP tools + optional CodeGraph code-intelligence, hot-reloadable agents.json",
+  "version": "0.2.4",
+  "description": "osModa Gateway — modular runtime (claude-code + openclaw 2026.5+ drivers), gateway-owned canonical transcript (JSONL per session) + durable MEMORY.md auto-load + transcript re-seed on session loss, disk-persisted runtime-tagged sessions, healthCheck-gated swaps, per-assistant-message text de-dup, tool-target hints, 92 MCP tools + optional CodeGraph code-intelligence, hot-reloadable agents.json",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

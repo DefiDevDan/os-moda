@@ -10,7 +10,7 @@ The sandbox exists for UNTRUSTED third-party tools, not for the agent itself.
 
 ## Current state
 
-- **osmoda-gateway** v0.2.3 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps, optional CodeGraph MCP server; per-assistant-message text de-dup; tool-target hints in the chat action log)
+- **osmoda-gateway** v0.2.4 (gateway-owned canonical transcript [JSONL per session, `GET /sessions/:agent/:key/transcript`] + durable `MEMORY.md` auto-load into the system prompt + transcript re-seed when a runtime session is missing/swapped; sessions disk-persisted, runtime-tagged, healthCheck-gated swaps, optional CodeGraph MCP server; per-assistant-message text de-dup; tool-target hints in the chat action log)
 - **Spawn-app API** v1.3.x (latest documented v1.3.1; internal ~v1.3.35 with chat persistence + watchdog + Engine UX + 3-col detail grid + heartbeat body-limit fix + single-source chat replay + smooth streaming reveal + live tool-action targets)
 - **Claude Code CLI** ^2.1.75 pin (refuses anything <2.x via gateway healthCheck)
 - **OpenClaw** driver **ported to OpenClaw 2026.5+ and available** (was blocked on the 2026.5.7 `run`→`agent` rename). Invocation: `openclaw agent --agent <id> --local --json --model <provider>/<model> --session-id <id> --message`; auth written as the 2026.5 `AuthProfileSecretsStore` shape `{version:1,profiles:{<id>:{type:"api_key",provider,key}}}`; non-default agent ids auto-registered via `openclaw agents add`. `healthCheck()` now probes for the `agent` subcommand. Selectable from the Engine tab (no more `422 driver_unavailable`).

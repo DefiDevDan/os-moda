@@ -26,6 +26,8 @@ import * as path from "node:path";
 import * as https from "node:https";
 import { WebSocketServer, WebSocket } from "ws";
 import { SessionStore } from "./sessions.js";
+import { TranscriptStore } from "./transcript.js";
+import { loadDurableMemory } from "./memory.js";
 import { ConfigCache } from "./config.js";
 import { runMigrationIfNeeded } from "./migrate.js";
 import { getCredential, loadCredentials } from "./credentials.js";
@@ -102,7 +104,7 @@ function getMcpConfigPath(mcpBridgePath) {
     return _mcpConfigPath;
 }
 // ── System prompt (SOUL.md etc) ─────────────────────────────────────────
-function loadSystemPrompt(agent) {
+function loadSystemPromptBase(agent) {
     if (agent.system_prompt_file) {
         try {
             return fs.readFileSync(agent.system_prompt_file, "utf8");
@@ -124,6 +126,13 @@ function loadSystemPrompt(agent) {
     }
     return `You are osModa, an AI system administrator with full root access. You manage this NixOS server using 92 tools via MCP.`;
 }
+function loadSystemPrompt(agent) {
+    // Base identity (SOUL.md) + durable cross-session memory (MEMORY.md + recent
+    // daily notes), so the agent remembers facts/preferences/decisions across
+    // brand-new conversations — OpenClaw-style. loadDurableMemory() returns ""
+    // when nothing is stored yet, so this is a no-op on a fresh box.
+    return loadSystemPromptBase(agent) + loadDurableMemory();
+}
 // ── Boot ────────────────────────────────────────────────────────────────
 const startTime = Date.now();
 const migrationReport = runMigrationIfNeeded();
@@ -135,6 +144,7 @@ if (migrationReport.ran) {
 const env = loadGatewayEnv();
 const cache = new ConfigCache();
 const sessions = new SessionStore();
+const transcripts = new TranscriptStore();
 // Prune expired sessions every 5 minutes.
 setInterval(() => sessions.prune(), 5 * 60 * 1000);
 // SIGHUP → in-memory config reload. Does not interrupt active sessions.
@@ -177,6 +187,37 @@ const server = http.createServer(async (req, res) => {
             uptime: Math.floor((Date.now() - startTime) / 1000),
             sessions: sessions.size,
         }));
+        return;
+    }
+    // Canonical transcript API (gateway owns session state; UI queries here).
+    // Bearer-authed with the gateway token, same as /config/*.
+    if (url.pathname === "/sessions" || url.pathname.startsWith("/sessions/")) {
+        if (env.authToken) {
+            const auth = req.headers.authorization;
+            if (auth !== `Bearer ${env.authToken}`) {
+                res.writeHead(401, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "unauthorized" }));
+                return;
+            }
+        }
+        // GET /sessions → list
+        if (req.method === "GET" && url.pathname === "/sessions") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ sessions: transcripts.list() }));
+            return;
+        }
+        // GET /sessions/<agentId>/<sessionKey>/transcript?since=N
+        const m = url.pathname.match(/^\/sessions\/([^/]+)\/(.+)\/transcript$/);
+        if (req.method === "GET" && m) {
+            const agentId = decodeURIComponent(m[1]);
+            const sessionKey = decodeURIComponent(m[2]);
+            const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ agentId, sessionKey, events: transcripts.read(agentId, sessionKey, since) }));
+            return;
+        }
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "not_found" }));
         return;
     }
     // Telegram webhook
@@ -235,23 +276,69 @@ wss.on("connection", (ws, req) => {
         }
         const sessionKey = msg.sessionKey || "ws-default";
         const session = sessions.getOrCreate(sessionKey, "web", agent.id, agent.runtime);
+        // Canonical transcript: record the user's message (gateway owns session
+        // state — the dashboard reads this, and it survives runtime swaps).
+        transcripts.append(agent.id, sessionKey, { role: "user", text: msg.text, source: "web" });
+        // Durable re-seed: if the runtime has no native session to resume (fresh
+        // box, wiped session file, or a claude-code↔openclaw swap) but we DO have a
+        // prior transcript, prepend a compact recap so the agent keeps its memory
+        // beyond the runtime's own storage. The runtime compacts further if needed.
+        let messageToSend = msg.text;
+        if (!session.claudeSessionId) {
+            const recap = transcripts.buildRecap(agent.id, sessionKey);
+            if (recap) {
+                messageToSend =
+                    `[Conversation recap — restored from osModa's durable transcript because the ` +
+                        `runtime session was not available (new session, or runtime switched). Continue the ` +
+                        `conversation naturally; do NOT re-introduce yourself or repeat earlier answers.]\n\n` +
+                        `${recap}\n\n[End of recap. The user's new message follows.]\n\n${msg.text}`;
+                console.log(`[transcript] re-seeded ${agent.id}:${sessionKey} from durable transcript (${recap.length} chars)`);
+            }
+        }
         abortController = new AbortController();
         const systemPrompt = loadSystemPrompt(agent);
+        let turnText = "";
+        const flushAssistant = () => {
+            if (turnText.trim()) {
+                transcripts.append(agent.id, sessionKey, { role: "assistant", text: turnText });
+                turnText = "";
+            }
+        };
         try {
             for await (const event of driver.startSession({
                 agent, credential, model: agent.model, systemPrompt,
                 mcpConfigPath: getMcpConfigPath(env.mcpBridgePath),
-                message: msg.text,
+                message: messageToSend,
                 sessionId: session.claudeSessionId,
                 abortSignal: abortController.signal,
                 workingDir: agent.profile_dir,
             })) {
                 if (ws.readyState !== WebSocket.OPEN)
                     break;
+                // Persist to the canonical transcript as events stream. Distinct
+                // assistant text segments are split at tool-call boundaries (mirrors
+                // the message structure the runtime emits).
+                if (event.type === "text" && event.text) {
+                    turnText += event.text;
+                }
+                else if (event.type === "tool_use") {
+                    flushAssistant();
+                    transcripts.append(agent.id, sessionKey, {
+                        role: "tool", kind: "use", name: event.name, target: event.target,
+                    });
+                }
+                else if (event.type === "tool_result") {
+                    transcripts.append(agent.id, sessionKey, { role: "tool", kind: "result", outcome: event.outcome });
+                }
+                else if (event.type === "done") {
+                    flushAssistant();
+                }
                 pipeEvent(ws, event, sessionKey, agent.runtime);
             }
+            flushAssistant();
         }
         catch (e) {
+            flushAssistant();
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: "error", text: e?.message || String(e) }));
             }

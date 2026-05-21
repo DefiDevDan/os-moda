@@ -10,13 +10,13 @@ The sandbox exists for UNTRUSTED third-party tools, not for the agent itself.
 
 ## Current state
 
-- **osmoda-gateway** v0.2.2 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps, optional CodeGraph MCP server)
-- **Spawn-app API** v1.3.x (latest documented v1.3.1; internal ~v1.3.33 with chat persistence + watchdog + Engine UX + 3-col detail grid + heartbeat body-limit fix)
+- **osmoda-gateway** v0.2.3 (sessions disk-persisted, runtime-tagged, healthCheck-gated swaps, optional CodeGraph MCP server; per-assistant-message text de-dup; tool-target hints in the chat action log)
+- **Spawn-app API** v1.3.x (latest documented v1.3.1; internal ~v1.3.35 with chat persistence + watchdog + Engine UX + 3-col detail grid + heartbeat body-limit fix + single-source chat replay + smooth streaming reveal + live tool-action targets)
 - **Claude Code CLI** ^2.1.75 pin (refuses anything <2.x via gateway healthCheck)
-- **OpenClaw** installed on every spawn but `unavailable` until the driver is ported to OpenClaw 2026.5+ (renamed `run` → `agent`, needs `agents add` registration step). See `packages/osmoda-gateway/src/drivers/openclaw.ts` `healthCheck()` for the exact CLI-port gate.
+- **OpenClaw** driver **ported to OpenClaw 2026.5+ and available** (was blocked on the 2026.5.7 `run`→`agent` rename). Invocation: `openclaw agent --agent <id> --local --json --model <provider>/<model> --session-id <id> --message`; auth written as the 2026.5 `AuthProfileSecretsStore` shape `{version:1,profiles:{<id>:{type:"api_key",provider,key}}}`; non-default agent ids auto-registered via `openclaw agents add`. `healthCheck()` now probes for the `agent` subcommand. Selectable from the Engine tab (no more `422 driver_unavailable`).
 - **CodeGraph** (colbymchenry/codegraph, MIT, pure-WASM tree-sitter + SQLite) installed on every spawn as an optional MCP server (env-gated `OSMODA_CODEGRAPH_ENABLED=1`). Gives the agent `codegraph_search/context/callers/callees/impact/node/explore/files/status` — a pre-indexed code knowledge graph for ~90% fewer grep/Read calls. Auto-indexes `/opt/osmoda` (self-modification awareness), `/workspace/*` (spec-kit), `/srv/*` (deployed apps) via `osmoda-codegraph-index.timer` (30-min sync); spec-kit init/implement hook into it. Security-audited 2026-05-20. Full phased plan in `CODEGRAPH-INTEGRATION.md`.
 
-See [`docs/STATUS.md`](docs/STATUS.md) for full per-component maturity + the latest operational hardening (2026-05-19→20: gateway 0.2.2, dual-signal wedge detector, healthCheck infrastructure, process-group abort, 8h hard cap, 127.0.0.1 lockdown, heartbeat body-limit fix, CodeGraph integration phases 1–3).
+See [`docs/STATUS.md`](docs/STATUS.md) for full per-component maturity + the latest operational hardening (2026-05-19→21: gateway 0.2.3, dual-signal wedge detector, healthCheck infrastructure, process-group abort, 8h hard cap, 127.0.0.1 lockdown, heartbeat body-limit fix, CodeGraph integration phases 1–3, OpenClaw 2026.5+ driver port, claude-code per-message text de-dup fix, single-source chat replay + smooth streaming, live tool-action targets).
 
 ## Architecture (3 trust tiers)
 
@@ -61,12 +61,14 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 
    **Runtime swaps are gated by `healthCheck()`**. Each driver probes its
    binary on demand (claude-code: `claude --version`, refuses <2.x; openclaw:
-   `openclaw --help`, refuses if the `run` subcommand isn't exposed). `GET
-   /config/drivers` returns `{available, version, error, remediation}` per
-   driver; `PATCH /config/agents/{id}` blocks an unhealthy swap with
-   `422 driver_unavailable` + actionable remediation. Caught the 2026-05-14
-   incident where OpenClaw 2026.5.7 renamed `run` → `agent`; chat after a
-   swap died with a bare `agent_error`. Can't recur.
+   `openclaw --help`, refuses if the `agent` subcommand isn't exposed — i.e.
+   requires OpenClaw 2026.5+). `GET /config/drivers` returns
+   `{available, version, error, remediation}` per driver; `PATCH
+   /config/agents/{id}` blocks an unhealthy swap with `422 driver_unavailable`
+   + actionable remediation. Caught the 2026-05-14 incident where OpenClaw
+   2026.5.7 renamed `run` → `agent`; chat after a swap died with a bare
+   `agent_error`. Since 2026-05-21 the openclaw driver is fully ported to that
+   CLI, so the swap now succeeds instead of being blocked.
 
 2b. **osmoda-bridge** (TypeScript) - OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
    `api.registerTool()` factory pattern (92 tools): system_health, system_query,

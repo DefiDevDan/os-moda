@@ -281,7 +281,18 @@ export const claudeCodeDriver = {
         const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
         let sessionId;
         let sessionYielded = false;
-        let lastTextLen = 0;
+        // De-dup text deltas PER assistant message. claude-code emits one assistant
+        // message before each tool call and another after — each with its own text
+        // block that starts at offset 0. A single session-wide counter sliced the
+        // 2nd+ message at the *previous* message's length, dropping its opening
+        // chars and gluing replies into garbage like
+        // "…what happened:cess running and trace…" (the dropped "Let me check the pro"
+        // from msg 2). Keying the counter by message.id fixes it: each message's
+        // text accumulates from its own 0, and we insert a paragraph break between
+        // distinct messages so they don't run together.
+        const textLenByMsg = new Map();
+        let lastTextMsgId = null;
+        let emittedAnyText = false;
         let hasOutput = false;
         let stderrText = "";
         proc.stderr?.on("data", (d) => { stderrText += d.toString(); });
@@ -306,18 +317,27 @@ export const claudeCodeDriver = {
                     sessionId = event.session_id;
                 }
                 else if (t === "assistant") {
+                    const msgId = event.message?.id || "msg-default";
                     const content = event.message?.content || [];
                     if (Array.isArray(content)) {
                         for (const block of content) {
                             if (block.type === "tool_use" && block.name) {
-                                yield { type: "tool_use", name: block.name };
+                                yield { type: "tool_use", name: block.name, target: toolTargetHint(block.input) };
                                 hasOutput = true;
                             }
                             else if (block.type === "text" && block.text) {
                                 const full = block.text;
-                                if (full.length > lastTextLen) {
-                                    yield { type: "text", text: full.slice(lastTextLen) };
-                                    lastTextLen = full.length;
+                                const prev = textLenByMsg.get(msgId) || 0;
+                                if (full.length > prev) {
+                                    // New assistant message after we've already streamed some
+                                    // text → separate it from the prior message's paragraph.
+                                    if (prev === 0 && emittedAnyText && msgId !== lastTextMsgId) {
+                                        yield { type: "text", text: "\n\n" };
+                                    }
+                                    yield { type: "text", text: full.slice(prev) };
+                                    textLenByMsg.set(msgId, full.length);
+                                    lastTextMsgId = msgId;
+                                    emittedAnyText = true;
                                     hasOutput = true;
                                 }
                             }
@@ -390,6 +410,34 @@ export const claudeCodeDriver = {
         yield { type: "done", sessionId };
     },
 };
+/**
+ * Distill a tool's input object into a one-line target hint for the chat UI.
+ * Order matters: prefer the most human-meaningful field. Truncated so a giant
+ * heredoc or file body never floods the activity log.
+ */
+function toolTargetHint(input) {
+    if (!input || typeof input !== "object")
+        return undefined;
+    const clip = (s, n = 80) => {
+        const str = String(s).replace(/\s+/g, " ").trim();
+        return str.length > n ? str.slice(0, n - 1) + "…" : str;
+    };
+    if (input.command)
+        return clip(input.command);
+    if (input.file_path)
+        return clip(input.file_path, 120);
+    if (input.path)
+        return clip(input.path, 120);
+    if (input.url)
+        return clip(input.url, 120);
+    if (input.pattern)
+        return clip(input.pattern);
+    if (input.query)
+        return clip(input.query);
+    if (input.prompt)
+        return clip(input.prompt);
+    return undefined;
+}
 function isSafeBaseUrl(raw) {
     let u;
     try {

@@ -26,7 +26,7 @@ TIER 2: Untrusted Execution
   User scripts, pip packages, npm installs, third-party binaries.
 ```
 
-## Agent gateway — modular runtime (v0.2.1)
+## Agent gateway — modular runtime (v0.2.3)
 
 ```
                       ┌─────────────────────────┐
@@ -97,6 +97,21 @@ hint. The probe is cheap (one `--version` or `--help` per driver,
 parallelised) and idempotent. Caught the 2026-05-14 OpenClaw
 `run`→`agent` CLI rename within the same hour; before this contract,
 every chat after the swap died with a bare `agent_error`.
+
+**OpenClaw 2026.5+ driver (v0.2.3).** The openclaw driver is ported to the
+current CLI and reports `available`. It invokes `openclaw agent --agent
+<id> --local --json --model <provider>/<model> --session-id <id>
+--message`, writes credentials in the 2026.5 `AuthProfileSecretsStore`
+shape (`{version:1,profiles:{<id>:{type:"api_key",provider,key}}}`) into
+the agent dir, and auto-registers any non-default agent id via `openclaw
+agents add`. healthCheck now requires the `agent` subcommand.
+
+**claude-code reply integrity (v0.2.3).** Streaming text is de-duplicated
+per assistant `message.id` (claude emits a separate assistant message
+before and after each tool call); a single session-wide counter used to
+slice the later message at the earlier one's length and corrupt the reply.
+Each `tool_use` also carries a `target` hint (command/path/url preview) so
+the chat action log shows what each tool is doing.
 
 ## Component Architecture
 

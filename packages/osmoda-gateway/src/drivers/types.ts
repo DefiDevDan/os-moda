@@ -41,6 +41,15 @@ export interface AgentEvent {
   type: "text" | "tool_use" | "tool_result" | "thinking" | "session" | "error" | "done";
   text?: string;
   name?: string;
+  /**
+   * For tool_use: a short human-readable hint of WHAT the tool is acting on —
+   * a command preview, file path, URL, or query. Lets the chat UI show
+   * "Bash · cat /var/log/…" instead of a bare "Bash" badge, so users can
+   * actually follow what the agent is doing.
+   */
+  target?: string;
+  /** For tool_result: "success" | "error" when known. */
+  outcome?: string;
   sessionId?: string;
   code?: string;
 }

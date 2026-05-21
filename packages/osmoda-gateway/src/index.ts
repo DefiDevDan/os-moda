@@ -278,9 +278,9 @@ function pipeEvent(ws: WebSocket, event: AgentEvent, sessionKey: string, runtime
     case "text":
       ws.send(JSON.stringify({ type: "text", text: event.text })); break;
     case "tool_use":
-      ws.send(JSON.stringify({ type: "tool_use", name: event.name })); break;
+      ws.send(JSON.stringify({ type: "tool_use", name: event.name, target: event.target })); break;
     case "tool_result":
-      ws.send(JSON.stringify({ type: "tool_result" })); break;
+      ws.send(JSON.stringify({ type: "tool_result", outcome: event.outcome })); break;
     case "thinking":
       ws.send(JSON.stringify({ type: "thinking", text: event.text })); break;
     case "session":

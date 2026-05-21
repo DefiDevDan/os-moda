@@ -1906,7 +1906,11 @@ function connect() {
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "assistant", data: { delta: msg.text } } }));
       } else if (msg.type === "tool_use") {
         if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
-        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name, type: "tool_use" } } }));
+        // Forward the gateway's `target` hint (command/path/url preview) so the
+        // dashboard action log shows WHAT the tool did, not just its name.
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name, type: "tool_use", target: msg.target } } }));
+      } else if (msg.type === "tool_result") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_result", data: { outcome: msg.outcome } } }));
       } else if (msg.type === "done") {
         if (ccLifecycleStarted) { upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "end" } } })); }
         ccLifecycleStarted = false;

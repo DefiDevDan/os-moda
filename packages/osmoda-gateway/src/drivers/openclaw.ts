@@ -50,16 +50,59 @@ function writeAuthProfile(agentId: string, cred: Credential): Promise<void> {
   const next = prev.then(async () => {
     const dir = path.join("/root/.openclaw/agents", agentId, "agent");
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const profile = cred.type === "oauth"
-      ? { type: "token", provider: cred.provider, token: cred.secret }
-      : { type: "api_key", provider: cred.provider, key: cred.secret };
+    // OpenClaw 2026.5+ auth store shape (AuthProfileSecretsStore):
+    //   { version: 1, profiles: { "<profileId>": <AuthProfileCredential> } }
+    // The pre-2026.5 driver wrote a BARE credential object ({type,provider,key})
+    // which the new loader silently ignores → "No API key found for provider".
+    // That single mismatch is why every openclaw chat failed after the
+    // 2026.5.7 upgrade. Verified live: this shape authenticates (the only
+    // remaining failure on test was a billing/credit error from the provider).
+    const profileId = `${cred.provider}-default`;
+    const credential =
+      cred.type === "oauth"
+        ? { type: "token", provider: cred.provider, token: cred.secret }
+        : { type: "api_key", provider: cred.provider, key: cred.secret };
+    const store = { version: 1, profiles: { [profileId]: credential } };
     const target = path.join(dir, "auth-profiles.json");
-    // Atomic write to avoid half-written file being read mid-launch.
     const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
-    fs.writeFileSync(tmp, JSON.stringify(profile), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(store), { mode: 0o600 });
     fs.renameSync(tmp, target);
   }, () => { /* swallow previous error — each call retries its own write */ });
   authWriteLocks.set(agentId, next);
+  return next;
+}
+
+/**
+ * OpenClaw 2026.5+ requires each non-default agent id to be registered in its
+ * agent registry before `openclaw agent --agent <id>` will run it (otherwise:
+ * "Unknown agent id"). Idempotent: lists agents, adds the id if missing. The
+ * auth profile is written separately (writeAuthProfile) into the agent dir.
+ */
+const agentRegisterLocks = new Map<string, Promise<void>>();
+function ensureAgentRegistered(bin: string, agentId: string, workspace: string): Promise<void> {
+  const prev = agentRegisterLocks.get(agentId) || Promise.resolve();
+  const next = prev.then(() => new Promise<void>((resolve) => {
+    const list = spawn(bin, ["agents", "list"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    list.stdout?.on("data", (d) => { out += d.toString(); });
+    list.on("close", () => {
+      // Match "- <id>" lines from `agents list`. `main` always exists.
+      const present = new RegExp(`(^|\\n)\\s*-\\s+${agentId}\\b`).test(out) || agentId === "main";
+      if (present) return resolve();
+      const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+      const add = spawn(
+        bin,
+        ["agents", "add", agentId, "--non-interactive", "--workspace", workspace, "--agent-dir", dir],
+        { stdio: ["ignore", "ignore", "ignore"] },
+      );
+      add.on("close", () => resolve());
+      add.on("error", () => resolve());
+      setTimeout(() => { try { add.kill("SIGKILL"); } catch {} ; resolve(); }, 15000);
+    });
+    list.on("error", () => resolve());
+    setTimeout(() => { try { list.kill("SIGKILL"); } catch {} ; resolve(); }, 8000);
+  }), () => {});
+  agentRegisterLocks.set(agentId, next);
   return next;
 }
 
@@ -114,22 +157,19 @@ export const openClawDriver: RuntimeDriver = {
     // Extract version. Output begins "🦞 OpenClaw 2026.5.7 (eeef486) — …".
     const versionMatch = stdout.match(/OpenClaw\s+([\d.]+(?:[-+][\w.]+)?)/);
     const version = versionMatch ? `OpenClaw ${versionMatch[1]}` : undefined;
-    // The driver in this file currently invokes `openclaw run …`. Reject if the
-    // installed binary doesn't expose that exact subcommand. The 2026.5+ line
-    // renamed it to `openclaw agent` — driver porting is on the v1.4 roadmap.
-    const hasRun = /^\s+run\b/m.test(stdout) || /^Commands:[\s\S]*\brun\b/m.test(stdout);
-    if (!hasRun) {
+    // This driver targets the 2026.5+ CLI: `openclaw agent --local --json …`.
+    // Require the `agent` subcommand. (Pre-2026.5 used `openclaw run`; if we
+    // ever see that without `agent`, the driver's invocation won't match.)
+    const hasAgent = /^\s+agent\b/m.test(stdout) || /^Commands:[\s\S]*\bagent\b/m.test(stdout);
+    if (!hasAgent) {
       return {
         available: false,
         version,
         error:
-          `Installed ${version || "openclaw"} does not expose the 'openclaw run' subcommand ` +
-          `that this driver invokes. The 2026.5.x line renamed it to 'openclaw agent' with a ` +
-          `different option set and a mandatory 'openclaw agents add' registration step.`,
+          `Installed ${version || "openclaw"} does not expose the 'openclaw agent' subcommand ` +
+          `this driver invokes. Expected OpenClaw 2026.5+.`,
         remediation:
-          "Use the claude-code runtime for now. The openclaw driver is being rewritten for the " +
-          "2026.5+ CLI; track progress at https://github.com/bolivian-peru/os-moda/issues " +
-          "(label: openclaw-driver-port).",
+          "Upgrade: cd /opt/openclaw && npm install openclaw@latest, then restart osmoda-gateway.",
       };
     }
     return { available: true, version };
@@ -195,15 +235,26 @@ export const openClawDriver: RuntimeDriver = {
       return;
     }
 
+    // Register the agent id with OpenClaw's registry if it isn't already
+    // (2026.5+ rejects `--agent <id>` for unregistered ids).
+    try { await ensureAgentRegistered(bin, opts.agent.id, cwd); } catch { /* best-effort */ }
+
+    // Stable session id for continuity. OpenClaw maintains the conversation
+    // under whatever id we pass; reuse it across turns. We echo it back as a
+    // `session` event so the gateway persists it and resumes next turn.
+    const sessionKey = opts.sessionId || `oc-${opts.agent.id}-${Date.now()}`;
+    // OpenClaw expects provider/model form; default models in agents.json may be
+    // bare ("claude-opus-4-7") — prefix with the credential's provider.
+    const modelArg = opts.model.includes("/") ? opts.model : `${opts.credential.provider}/${opts.model}`;
     const args = [
-      "run",
+      "agent",
       "--agent", opts.agent.id,
-      "--model", opts.model,
-      "--mcp-config", opts.mcpConfigPath,
-      "--output-format", "json",
+      "--local",
+      "--json",
+      "--model", modelArg,
+      "--session-id", sessionKey,
       "--message", opts.message,
     ];
-    if (opts.sessionId) args.push("--resume", opts.sessionId);
 
     let proc: ChildProcess;
     try {
@@ -273,49 +324,40 @@ export const openClawDriver: RuntimeDriver = {
       }, { once: true });
     }
 
-    const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
+    // Persist the session id immediately so continuity survives even if the
+    // turn errors before producing output.
+    yield { type: "session", sessionId: sessionKey };
+
+    // `openclaw agent --json` writes its RESULT as JSON on stdout and routes
+    // diagnostics ([agent/embedded], [diagnostic], [model-fallback]) to stderr.
+    // We accumulate stdout and parse at the end. Some builds emit NDJSON event
+    // lines instead of one object — handle both: collect candidate JSON values,
+    // prefer the last one that carries reply text.
+    const sessionId: string | undefined = sessionKey;
     let stderrText = "";
-    let sessionId: string | undefined;
+    let stdoutText = "";
     let hasOutput = false;
     proc.stderr?.on("data", (d: Buffer) => { stderrText += d.toString(); });
+    proc.stdout?.on("data", (d: Buffer) => { stdoutText += d.toString(); });
 
-    try {
-      for await (const line of rl) {
-        if (!line.trim()) continue;
-        let ev: any;
-        try { ev = JSON.parse(line); } catch { continue; }
-
-        // Normalize OpenClaw's event stream into our AgentEvent shape.
-        // OpenClaw emits shapes like:
-        //   { type: "event", event: "agent", payload: { stream: "assistant", data: { text, delta } } }
-        //   { type: "event", event: "tool_use", payload: { name } }
-        //   { type: "event", event: "chat", payload: { state: "final", message: { content: [...] } } }
-        if (ev.event === "agent" && ev.payload?.stream === "assistant") {
-          const delta = ev.payload.data?.delta;
-          if (typeof delta === "string" && delta.length) {
-            yield { type: "text", text: delta };
-            hasOutput = true;
-          }
-        } else if (ev.event === "tool_use" && ev.payload?.name) {
-          yield { type: "tool_use", name: ev.payload.name };
-          hasOutput = true;
-        } else if (ev.event === "tool_result") {
-          yield { type: "tool_result" };
-        } else if (ev.event === "chat" && ev.payload?.state === "final") {
-          const content = ev.payload.message?.content;
-          if (Array.isArray(content) && !hasOutput) {
-            const joined = content
-              .filter((c: any) => c.type === "text" && c.text)
-              .map((c: any) => c.text)
-              .join("\n");
-            if (joined) { yield { type: "text", text: joined }; hasOutput = true; }
-          }
-        } else if (ev.type === "session" && ev.session_id) {
-          sessionId = ev.session_id;
-          yield { type: "session", sessionId };
-        }
+    const extractText = (v: any): string | undefined => {
+      if (!v || typeof v !== "object") return undefined;
+      if (typeof v.text === "string" && v.text.trim()) return v.text;
+      if (typeof v.reply === "string" && v.reply.trim()) return v.reply;
+      if (typeof v.output === "string" && v.output.trim()) return v.output;
+      if (typeof v.result === "string" && v.result.trim()) return v.result;
+      const content = v.message?.content || v.content;
+      if (Array.isArray(content)) {
+        const joined = content
+          .filter((c: any) => c && c.type === "text" && c.text)
+          .map((c: any) => c.text)
+          .join("\n");
+        if (joined.trim()) return joined;
       }
-    } catch { /* ignore */ }
+      if (v.data) { const inner = extractText(v.data); if (inner) return inner; }
+      if (v.payload) { const inner = extractText(v.payload); if (inner) return inner; }
+      return undefined;
+    };
 
     const code = await new Promise<number>((resolve) => {
       proc.on("close", (c) => resolve(c ?? 1));
@@ -330,8 +372,36 @@ export const openClawDriver: RuntimeDriver = {
         resolve(124);
       }, hardCapMs);
     });
+
+    // Parse the accumulated stdout. Try whole-buffer JSON first (the common
+    // `--json` single-object case), then fall back to NDJSON line scan,
+    // then to raw text.
+    let replyText: string | undefined;
+    const trimmed = stdoutText.trim();
+    if (trimmed) {
+      try {
+        replyText = extractText(JSON.parse(trimmed));
+      } catch {
+        for (const line of trimmed.split("\n")) {
+          const s = line.trim();
+          if (!s.startsWith("{") && !s.startsWith("[")) continue;
+          try { const t = extractText(JSON.parse(s)); if (t) replyText = t; } catch { /* skip */ }
+        }
+      }
+      // Last resort: if stdout had content but no JSON text field, and the
+      // process succeeded, surface the raw stdout so the user isn't left blank.
+      if (!replyText && code === 0 && !/^[\s{[]/.test(trimmed)) replyText = trimmed;
+    }
+    if (replyText) { yield { type: "text", text: replyText }; hasOutput = true; }
+
     if (code !== 0 && !hasOutput && !opts.abortSignal?.aborted) {
-      yield { type: "error", text: stderrText.trim().split("\n").pop() || `openclaw exited ${code}` };
+      // OpenClaw surfaces provider errors (billing, rate limit, auth) in the
+      // stderr diagnostics — pull the most informative line.
+      const errLine =
+        (stderrText.match(/error="?([^"\n]+)"?/) || [])[1] ||
+        stderrText.trim().split("\n").filter(Boolean).pop() ||
+        `openclaw exited ${code}`;
+      yield { type: "error", text: errLine };
     }
     yield { type: "done", sessionId };
   },

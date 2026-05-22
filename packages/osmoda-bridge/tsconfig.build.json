@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": false,
+    "esModuleInterop": true,
+    "declaration": false,
+    "sourceMap": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["index.ts", "keyd-client.ts", "watch-client.ts", "routines-client.ts", "voice-client.ts", "mesh-client.ts", "mcpd-client.ts", "teachd-client.ts"],
+  "exclude": ["node_modules", "dist"]
+}

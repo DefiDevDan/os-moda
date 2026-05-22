@@ -899,17 +899,37 @@ log "Step 6: Setting up tool bridge..."
 # MCP bridge is ALWAYS installed (both drivers route tools through it).
 log "MCP bridge ready with 91 tools (via osmoda-mcp-bridge)."
 
-# ALSO install the OpenClaw plugin flavor when OpenClaw is present, so the
-# openclaw driver exposes the same 91 tools via OpenClaw's plugin system.
+# ALSO register the OpenClaw plugin flavor when OpenClaw is present, so the
+# openclaw runtime exposes the same 91 tools via OpenClaw's plugin system.
+#
+# OpenClaw 2026.5+ does NOT load a bare `cp` into ~/.openclaw/extensions. It
+# requires `openclaw plugins install <path>` against a COMPILED entry
+# (dist/index.js) whose manifest declares `contracts.tools` (the tool names it
+# registers). The bridge is our own tier-0 plugin (child_process + daemon
+# sockets are its whole purpose), so we force past the dangerous-code scanner.
+# Files must be root-owned (they are: git clone runs as root).
 if [ "$RUNTIME" = "openclaw" ] || command -v openclaw &>/dev/null; then
   PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
-  PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
   if [ -d "$PLUGIN_SRC" ]; then
-    mkdir -p /root/.openclaw/extensions
-    rm -rf "$PLUGIN_DST"
-    cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
-    chown -R root:root "$PLUGIN_DST"
-    log "OpenClaw plugin installed with 91 system tools."
+    # Build TS → dist/ if a prebuilt dist isn't shipped in the repo.
+    if [ ! -f "$PLUGIN_SRC/dist/index.js" ]; then
+      ( cd "$PLUGIN_SRC" && "$GATEWAY_DIR/node_modules/.bin/tsc" -p tsconfig.build.json ) 2>&1 | tail -2 \
+        || ( cd "$PLUGIN_SRC" && npx --yes typescript@5 tsc -p tsconfig.build.json ) 2>&1 | tail -2 \
+        || warn "osmoda-bridge build failed"
+    fi
+    if [ -f "$PLUGIN_SRC/dist/index.js" ]; then
+      chown -R root:root "$PLUGIN_SRC"
+      openclaw plugins install "$PLUGIN_SRC" --link --force --dangerously-force-unsafe-install 2>&1 | tail -2 \
+        || warn "openclaw plugins install failed"
+      openclaw plugins registry --refresh 2>&1 | tail -1 || true
+      if openclaw plugins doctor 2>&1 | grep -qi "no plugin issues"; then
+        log "OpenClaw plugin registered (91 system tools, contracts validated)."
+      else
+        warn "OpenClaw plugin registered but doctor reported issues — run: openclaw plugins doctor"
+      fi
+    else
+      warn "osmoda-bridge dist/index.js missing — openclaw runtime will lack osModa tools until built"
+    fi
   fi
 fi
 

@@ -112,7 +112,11 @@ export const openClawDriver: RuntimeDriver = {
   description:
     "OpenClaw multi-runtime CLI (BYOK). API key only — does not accept Claude Pro OAuth tokens. Pick this for the OpenClaw plugin ecosystem or non-Anthropic providers.",
   supportedProviders: ["anthropic", "openai"],
-  supportedAuthTypes: ["api_key"],
+  // OpenClaw 2026.5 accepts a static bearer token too (written as an
+  // AuthProfile of type "token") — verified live: a Claude OAuth subscription
+  // token authenticated through `openclaw agent --local` (only blocked by the
+  // subscription's usage cap, not by auth). So both api_key and oauth work.
+  supportedAuthTypes: ["api_key", "oauth"],
   defaultModels: ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "gpt-5"],
 
   async healthCheck(): Promise<DriverHealthResult> {
@@ -176,15 +180,17 @@ export const openClawDriver: RuntimeDriver = {
   },
 
   async testCredential(cred: Credential): Promise<CredentialTestResult> {
-    if (cred.type !== "api_key") {
-      return { ok: false, error: `openclaw supports type=api_key only (got ${cred.type})` };
+    if (cred.type !== "api_key" && cred.type !== "oauth") {
+      return { ok: false, error: `openclaw supports type=api_key or oauth (got ${cred.type})` };
     }
     if (!findOpenClawBinary()) {
       return { ok: false, error: "openclaw binary not installed on this host" };
     }
     if (cred.provider === "anthropic") {
-      if (!cred.secret.startsWith("sk-ant-api")) {
-        return { ok: false, error: "anthropic api_key should start with sk-ant-api…" };
+      // api_key → sk-ant-api…; oauth subscription token → sk-ant-oat…
+      const ok = cred.type === "oauth" ? cred.secret.startsWith("sk-ant-oat") : cred.secret.startsWith("sk-ant-api");
+      if (!ok) {
+        return { ok: false, error: `anthropic ${cred.type} should start with sk-ant-${cred.type === "oauth" ? "oat" : "api"}…` };
       }
     } else if (cred.provider === "openai") {
       if (!cred.secret.startsWith("sk-")) {

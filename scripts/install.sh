@@ -84,7 +84,7 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
-RUNTIME="claude-code"  # claude-code (default; OAuth + API key) or openclaw (BYOK; API key only)
+RUNTIME="openclaw"  # openclaw (default/executive; the original osModa runtime — local-first, loads the 91-tool osmoda-bridge, accepts API key OR OAuth-as-token) or claude-code (peer; OAuth + API key)
 SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
 DEFAULT_MODEL=""       # initial default model for the osmoda agent
 # Repeatable --credential flag. Each value: `label|provider|type|base64-secret`
@@ -127,7 +127,7 @@ while [[ $# -gt 0 ]]; do
       echo "                        provider ∈ {anthropic, openai, openrouter}"
       echo "                        type     ∈ {oauth, api_key}"
       echo "  --default-model NAME  Initial default model (e.g. claude-opus-4-6)"
-      echo "  --runtime NAME        Agent runtime: claude-code (default) or openclaw"
+      echo "  --runtime NAME        Agent runtime: openclaw (default/executive) or claude-code"
       echo "  --branch NAME         Git branch to install (default: main)"
       echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
       echo "  --callback-url URL    Heartbeat callback URL (set by spawn.os.moda)"

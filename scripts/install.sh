@@ -3073,3 +3073,66 @@ if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ] && [ -x "$INSTALL_DIR/bin/osmoda
   # Run a second time after 10s to pick up any actions returned by the first heartbeat
   ( sleep 10 && "$INSTALL_DIR/bin/osmoda-heartbeat.sh" 2>/dev/null || true ) &
 fi
+
+# ───────────────────────────────────────────────────────────────────────────
+# Step N: End-of-install smoke. Fail LOUD (non-zero exit) on anything that
+# would silently ship a broken box. The earlier cohort had several silent
+# fleet-wide install bugs (openclaw extension path, heartbeat body-limit,
+# missing bridge contracts.tools, PAM expiry) that went unnoticed for days.
+# Smoke catches them at install time so the spawn-app retries or alerts.
+# ───────────────────────────────────────────────────────────────────────────
+log "Running post-install smoke checks..."
+SMOKE_FAILED=0
+smoke_fail() { warn "  ✗ smoke: $1"; SMOKE_FAILED=$((SMOKE_FAILED+1)); }
+smoke_ok()   { log  "  ✓ smoke: $1"; }
+
+# Wait briefly for the gateway to come up (it's just been (re)started).
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  curl -sf -o /dev/null --max-time 3 http://127.0.0.1:18789/health && break
+  sleep 1
+done
+
+# 1. Gateway /health 200.
+if curl -sf -o /dev/null --max-time 5 http://127.0.0.1:18789/health; then
+  smoke_ok "gateway /health 200"
+else
+  smoke_fail "gateway /health not reachable on 127.0.0.1:18789"
+fi
+
+# 2. Both runtimes report available (claude-code + openclaw).
+if [ -f "$STATE_DIR/config/gateway-token" ]; then
+  GWTOK=$(cat "$STATE_DIR/config/gateway-token")
+  DRV=$(curl -sf -H "Authorization: Bearer $GWTOK" --max-time 5 http://127.0.0.1:18789/config/drivers || echo "")
+  echo "$DRV" | grep -q '"name":"claude-code"[^}]*"available":true' \
+    && smoke_ok "claude-code driver available" \
+    || smoke_fail "claude-code driver NOT available"
+  echo "$DRV" | grep -q '"name":"openclaw"[^}]*"available":true' \
+    && smoke_ok "openclaw driver available" \
+    || smoke_fail "openclaw driver NOT available — install.sh openclaw block did not take"
+else
+  smoke_fail "no gateway-token at $STATE_DIR/config/gateway-token"
+fi
+
+# 3. openclaw plugins doctor — exits 0 + no issues.
+if command -v openclaw &>/dev/null; then
+  if openclaw plugins doctor 2>&1 | grep -qi "no plugin issues"; then
+    smoke_ok "openclaw plugins doctor clean"
+  else
+    smoke_fail "openclaw plugins doctor reported issues — run: openclaw plugins doctor"
+  fi
+fi
+
+# 4. mcp-bridge entry exists (claude-code path needs it).
+if [ -f "$INSTALL_DIR/packages/osmoda-mcp-bridge/dist/index.js" ]; then
+  smoke_ok "osmoda-mcp-bridge dist present"
+else
+  smoke_fail "osmoda-mcp-bridge/dist/index.js missing"
+fi
+
+if [ "$SMOKE_FAILED" -gt 0 ]; then
+  warn "post-install smoke: $SMOKE_FAILED failure(s) — review above"
+  # Non-zero exit so cloud-init / spawn-app sees the install as failed
+  # instead of silently shipping a broken box.
+  exit 7
+fi
+log "Post-install smoke: all checks passed."

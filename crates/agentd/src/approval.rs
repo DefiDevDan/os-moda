@@ -3,6 +3,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 /// Commands that are always considered destructive, regardless of configuration.
+/// Substring match against the normalized (lowercased, whitespace-collapsed) command.
 const DANGEROUS_COMMANDS: &[&str] = &[
     "rm -rf",
     "mkfs",
@@ -32,6 +33,17 @@ const DANGEROUS_COMMANDS: &[&str] = &[
     "kill -9",
     "pkill",
     "killall",
+    // SQL data-destroying statements. Match common piping patterns to psql/mysql/sqlite.
+    "drop database",
+    "drop table",
+    "drop schema",
+    "truncate table",
+    // Binding a service publicly without explicit approval is a hard rule
+    // (per CLAUDE.md). Heuristics match common shapes — argument flags
+    // (--host 0.0.0.0, --bind 0.0.0.0), nginx listens, docker port mappings,
+    // and Python servers (--host=0.0.0.0 / server.run(host='0.0.0.0')).
+    "0.0.0.0",
+    "::0:0:0:0",
 ];
 
 /// Operations that require approval (matches NixOS approvalRequired list).
@@ -177,6 +189,47 @@ impl ApprovalGate {
         }
 
         false
+    }
+
+    /// Hard runtime-block gate. Returns Ok(()) if the command is safe to run
+    /// OR an approval token (existing PendingApproval id with status Approved)
+    /// authorizes it. Returns Err otherwise — callers MUST treat the Err as
+    /// "do not execute" and surface the message to the operator.
+    ///
+    /// This is the enforcement primitive that turns the ApprovalGate from
+    /// advisory into a real runtime block. Wire it into every code path that
+    /// executes a command on behalf of the agent (shell_exec, nix.rebuild,
+    /// wallet.send, …). The agent must call /approval/request first, get an
+    /// id, have the operator approve it, then pass that id back in.
+    pub fn check_and_reject(&self, command: &str, approval_id: Option<&str>) -> Result<()> {
+        if !self.is_destructive(command) {
+            return Ok(());
+        }
+        let id = match approval_id {
+            Some(id) if !id.is_empty() => id,
+            _ => anyhow::bail!(
+                "destructive operation blocked by ApprovalGate: '{}' — request approval via POST /approval/request first",
+                truncate(command, 200)
+            ),
+        };
+        let pending = self
+            .check_approval(id)?
+            .ok_or_else(|| anyhow::anyhow!("approval id '{}' not found", id))?;
+        if pending.status != ApprovalStatus::Approved {
+            anyhow::bail!(
+                "destructive operation blocked: approval '{}' is {} (must be Approved)",
+                id, pending.status
+            );
+        }
+        // The approval must be for THIS exact command — prevent ticket reuse for
+        // different destructive ops.
+        if pending.command != command {
+            anyhow::bail!(
+                "destructive operation blocked: approval '{}' was issued for a different command",
+                id
+            );
+        }
+        Ok(())
     }
 
     /// Request approval for a destructive operation. Returns the approval ID.
@@ -379,6 +432,10 @@ impl ApprovalGate {
     }
 }
 
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max { s.to_string() } else { format!("{}…", &s[..max]) }
+}
+
 fn parse_status(s: &str) -> ApprovalStatus {
     match s {
         "approved" => ApprovalStatus::Approved,
@@ -423,6 +480,59 @@ mod tests {
         assert!(gate.is_destructive("reboot"));
         assert!(gate.is_destructive("shutdown -h now"));
         assert!(gate.is_destructive("kill -9 1234"));
+    }
+
+    #[test]
+    fn test_is_destructive_sql_and_public_bind_patterns() {
+        let gate = test_gate();
+        // SQL data-destroying statements (the LIRR-style incident class).
+        assert!(gate.is_destructive("psql -c 'DROP DATABASE prod'"));
+        assert!(gate.is_destructive("echo 'drop table users' | psql"));
+        assert!(gate.is_destructive("TRUNCATE TABLE orders"));
+        assert!(gate.is_destructive("DROP SCHEMA public CASCADE"));
+        // Public-bind variants (the never-bind-0.0.0.0 rule).
+        assert!(gate.is_destructive("python -m http.server --bind 0.0.0.0 8000"));
+        assert!(gate.is_destructive("node server.js --host=0.0.0.0"));
+        assert!(gate.is_destructive("docker run -p 0.0.0.0:80:80 nginx"));
+        // nixos-rebuild boot is gated by the existing 'nixos-rebuild' pattern.
+        assert!(gate.is_destructive("nixos-rebuild boot"));
+        // Sanity: clearly safe commands stay safe.
+        assert!(!gate.is_destructive("ls -la /var/log"));
+        assert!(!gate.is_destructive("curl -s https://example.com/api"));
+        assert!(!gate.is_destructive("SELECT * FROM users LIMIT 10"));
+    }
+
+    #[test]
+    fn test_check_and_reject_blocks_unapproved_destructive_ops() {
+        let gate = test_gate();
+        // Safe commands pass.
+        assert!(gate.check_and_reject("ls /etc", None).is_ok());
+        // Destructive without approval -> rejected.
+        let err = gate.check_and_reject("rm -rf /tmp/anything", None).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("blocked"));
+        // Destructive with a non-existent approval id -> rejected.
+        let err = gate
+            .check_and_reject("DROP DATABASE prod", Some("bogus_id"))
+            .unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("not found"));
+        // Pending (not yet approved) -> rejected.
+        let p = gate
+            .request_approval("python -m http.server --bind 0.0.0.0 8080", "agent", "demo", Some(60))
+            .unwrap();
+        let err = gate
+            .check_and_reject("python -m http.server --bind 0.0.0.0 8080", Some(&p.id))
+            .unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("must be approved"));
+        // Approved for THIS command -> passes.
+        gate.approve(&p.id, "operator").unwrap();
+        assert!(gate
+            .check_and_reject("python -m http.server --bind 0.0.0.0 8080", Some(&p.id))
+            .is_ok());
+        // Approval ticket reuse for a DIFFERENT destructive command -> rejected.
+        let err = gate
+            .check_and_reject("rm -rf /", Some(&p.id))
+            .unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("different command"));
     }
 
     #[test]

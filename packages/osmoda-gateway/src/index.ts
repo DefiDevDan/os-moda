@@ -31,7 +31,11 @@ import { TranscriptStore } from "./transcript.js";
 import { loadDurableMemory } from "./memory.js";
 import { ConfigCache } from "./config.js";
 import { runMigrationIfNeeded } from "./migrate.js";
-import { getCredential, loadCredentials } from "./credentials.js";
+import {
+  getCredential, loadCredentials,
+  markCredentialCooldown, pickFallbackCredential, classifyCredentialError,
+} from "./credentials.js";
+import type { Credential } from "./drivers/types.js";
 import { getDriver, listDrivers } from "./drivers/index.js";
 import type { AgentProfile, AgentEvent } from "./drivers/types.js";
 import { handleConfigRequest } from "./config-api.js";
@@ -322,32 +326,90 @@ wss.on("connection", (ws, req) => {
       }
     };
 
-    try {
+    // Run one pass through the driver. Returns:
+    //   sawCredError: a quota/auth/rate-limit error (cooldown candidate)
+    //   hadOutput:    whether any text/tool frame reached the client (in which
+    //                 case a fallback retry would be confusing — skip it)
+    //   credErrorReason: out_of_usage / rate_limited / auth_failed (or null)
+    //   lastErrorText: for surfacing
+    const runPass = async (cred: Credential): Promise<{
+      sawCredError: boolean; hadOutput: boolean; credErrorReason: string | null; lastErrorText: string | null;
+    }> => {
+      let sawCredError = false;
+      let hadOutput = false;
+      let credErrorReason: string | null = null;
+      let lastErrorText: string | null = null;
       for await (const event of driver.startSession({
-        agent, credential, model: agent.model, systemPrompt,
+        agent, credential: cred, model: agent.model, systemPrompt,
         mcpConfigPath: getMcpConfigPath(env.mcpBridgePath),
         message: messageToSend,
         sessionId: session.claudeSessionId,
-        abortSignal: abortController.signal,
+        abortSignal: abortController!.signal,
         workingDir: agent.profile_dir,
       })) {
         if (ws.readyState !== WebSocket.OPEN) break;
-        // Persist to the canonical transcript as events stream. Distinct
-        // assistant text segments are split at tool-call boundaries (mirrors
-        // the message structure the runtime emits).
         if (event.type === "text" && event.text) {
           turnText += event.text;
+          hadOutput = true;
         } else if (event.type === "tool_use") {
           flushAssistant();
           transcripts.append(agent.id, sessionKey, {
             role: "tool", kind: "use", name: event.name, target: event.target,
           });
+          hadOutput = true;
         } else if (event.type === "tool_result") {
           transcripts.append(agent.id, sessionKey, { role: "tool", kind: "result", outcome: event.outcome });
         } else if (event.type === "done") {
           flushAssistant();
+        } else if (event.type === "error") {
+          lastErrorText = event.text || lastErrorText;
+          const reason = classifyCredentialError({ code: event.code, text: event.text });
+          if (reason) { sawCredError = true; credErrorReason = reason; }
         }
+        // Suppress the terminal error frame from the client if we're about to
+        // try a fallback — the dashboard would show a scary error for a turn
+        // that's actually still in progress.
+        if (event.type === "error" && sawCredError && !hadOutput) continue;
         pipeEvent(ws, event, sessionKey, agent.runtime);
+      }
+      return { sawCredError, hadOutput, credErrorReason, lastErrorText };
+    };
+
+    try {
+      let active = credential;
+      let pass = await runPass(active);
+
+      // Fallback: if THIS credential is exhausted and we haven't streamed any
+      // output yet, cool it down and retry once with the next healthy
+      // credential of the same provider+type.
+      if (pass.sawCredError && !pass.hadOutput) {
+        markCredentialCooldown(active.id, pass.credErrorReason || "unknown", 30 * 60 * 1000);
+        const next = pickFallbackCredential(active);
+        // Tell the dashboard what just happened (state.changed semantics).
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: "credential_cooldown",
+            credential_id: active.id,
+            label: active.label,
+            reason: pass.credErrorReason,
+            cooldown_minutes: 30,
+            falling_back_to: next ? { id: next.id, label: next.label } : null,
+          }));
+        }
+        console.log(`[creds] cooldown ${active.label} (${pass.credErrorReason}); fallback → ${next?.label || "none"}`);
+        if (next) {
+          active = next;
+          pass = await runPass(active);
+        } else {
+          // No fallback available — surface the original error to the client.
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: "error",
+              code: "credential_exhausted",
+              text: `All ${credential.provider} ${credential.type} credentials are exhausted/cooldowned. ${pass.lastErrorText || ""}`,
+            }));
+          }
+        }
       }
       flushAssistant();
     } catch (e: any) {

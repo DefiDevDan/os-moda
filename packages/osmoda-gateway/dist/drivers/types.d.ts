@@ -20,6 +20,10 @@ export interface Credential {
     last_test_ok?: boolean;
     last_test_error?: string | null;
     last_used_at?: string | null;
+    /** ISO timestamp until which this credential is in cooldown (exhausted/rate-limited). */
+    cooldown_until?: string | null;
+    /** Why we cooled this credential down (e.g. "out_of_usage", "http_401", "http_429"). */
+    cooldown_reason?: string | null;
 }
 export interface AgentProfile {
     id: string;

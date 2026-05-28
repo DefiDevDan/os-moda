@@ -141,7 +141,7 @@ export function getCredential(id: string): Credential | null {
 
 export function updateCredentialMeta(
   id: string,
-  patch: Partial<Pick<Credential, "label" | "last_tested_at" | "last_test_ok" | "last_test_error" | "last_used_at">>,
+  patch: Partial<Pick<Credential, "label" | "last_tested_at" | "last_test_ok" | "last_test_error" | "last_used_at" | "cooldown_until" | "cooldown_reason">>,
 ): boolean {
   const file = loadCredentials();
   const c = file.credentials.find((x) => x.id === id);
@@ -149,6 +149,56 @@ export function updateCredentialMeta(
   Object.assign(c, patch);
   saveCredentials(file);
   return true;
+}
+
+/**
+ * Park a credential for `ms` because it errored with a quota/auth/rate-limit
+ * signal (out_of_usage / 401 / 429). The session loop will skip cooldowned
+ * credentials and fall back to the next healthy one of the same provider+type.
+ */
+export function markCredentialCooldown(id: string, reason: string, ms = 30 * 60 * 1000): boolean {
+  return updateCredentialMeta(id, {
+    cooldown_until: new Date(Date.now() + ms).toISOString(),
+    cooldown_reason: reason,
+  });
+}
+
+/** True if this credential is currently in cooldown (cooldown_until > now). */
+export function isCooldown(c: Pick<Credential, "cooldown_until">): boolean {
+  if (!c.cooldown_until) return false;
+  return new Date(c.cooldown_until).getTime() > Date.now();
+}
+
+/**
+ * Pick the next healthy credential of the same provider+type, excluding the
+ * one we just tried. Returns null when nothing is available.
+ */
+export function pickFallbackCredential(failed: Credential): Credential | null {
+  const file = loadCredentials();
+  const candidates = file.credentials.filter(
+    (c) => c.id !== failed.id
+      && c.provider === failed.provider
+      && c.type === failed.type
+      && !isCooldown(c),
+  );
+  if (!candidates.length) return null;
+  // Prefer the default if it's a candidate; else the most recently used; else first.
+  const def = candidates.find((c) => c.id === file.default_credential_id);
+  if (def) return def;
+  candidates.sort((a, b) => (b.last_used_at || "").localeCompare(a.last_used_at || ""));
+  return candidates[0];
+}
+
+/**
+ * Classify a driver error code/text into a cooldown reason string, or null if
+ * the error isn't a credential-level failure we should cool down on.
+ */
+export function classifyCredentialError(args: { code?: string; text?: string }): string | null {
+  const blob = `${args.code || ""} ${args.text || ""}`.toLowerCase();
+  if (blob.includes("out of extra usage") || blob.includes("out_of_usage") || blob.includes("credit balance is too low") || blob.includes("insufficient_quota")) return "out_of_usage";
+  if (args.code === "http_429" || blob.includes("rate limit") || blob.includes("rate_limited")) return "rate_limited";
+  if (args.code === "http_401" || args.code === "http_403" || blob.includes("invalid api key") || blob.includes("unauthorized")) return "auth_failed";
+  return null;
 }
 
 /** Strip secrets for safe serialization over the wire. */

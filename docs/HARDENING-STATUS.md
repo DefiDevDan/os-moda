@@ -22,8 +22,10 @@ Source goal: [`/Users/admin/Desktop/molt-os/goal.txt`](../goal.txt).
 
 ## Remaining work — not blocked, but substantial (next session)
 
-- **P1** Spawn-app smoke tests (≥ 20 `node:test` cases on `/api/v1/*` with mock fetch). Lives in gitignored `apps/spawn/test/`, runs locally before `push.sh`. ~Half-day effort because `server.js` is ~14 k lines with heavy closures + file I/O that need mocking.
-- **Wire `check_and_reject` into actual call paths** (`shell_exec`, `system.mutate`, `wallet.send`). Today the primitive is built + tested but only ApprovalGate code references it. The wiring step is what fully closes the "advisory → enforced" gap.
+- **Wire `check_and_reject` into actual call paths** (`shell_exec`, `system.mutate`, `wallet.send`). Today the primitive is built + tested AND exposed as `POST /approval/check`, but only ApprovalGate code calls it internally. The wiring step (osmoda-bridge `shell_exec` POSTs to the endpoint before exec) is what fully closes the "advisory → enforced" gap. Single, well-scoped TypeScript change.
+
+## Done after the initial status snapshot
+- **P1** Spawn-app smoke — **25/25 `node:test` cases green** at `apps/spawn/test/smoke.test.js` (live API smoke against `https://spawn.os.moda`, read-only/negative paths only; covers plans, OpenAPI surface, agent-card, status error envelope + request_id correlation, x402 invoice decode from `payment-required` header, Idempotency-Key validation, path-param validation surface, full auth-required surface, HSTS, chat WS reachability). Runs via `npm test` in `apps/spawn/` before `push.sh`.
 
 ## How to pick up next session
 1. Read `goal.txt`.

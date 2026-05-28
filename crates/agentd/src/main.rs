@@ -159,6 +159,8 @@ async fn main() {
         .route("/approval/{id}/approve", post(api::approval::approval_approve_handler))
         .route("/approval/{id}/deny", post(api::approval::approval_deny_handler))
         .route("/approval/{id}", get(api::approval::approval_check_handler))
+        // Runtime-block gate (callers consult this BEFORE executing).
+        .route("/approval/check", post(api::approval::approval_check_command_handler))
         // Sandbox
         .route("/sandbox/exec", post(api::sandbox::sandbox_exec_handler))
         .route("/capability/mint", post(api::sandbox::capability_mint_handler))

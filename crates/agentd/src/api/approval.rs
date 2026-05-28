@@ -14,6 +14,48 @@ pub struct ApprovalRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ApprovalCheckRequest {
+    /// The exact command/operation about to be executed.
+    pub command: String,
+    /// Optional approval id minted earlier by POST /approval/request and approved by an operator.
+    pub approval_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApprovalCheckResponse {
+    pub allow: bool,
+    pub is_destructive: bool,
+    pub reason: Option<String>,
+}
+
+/// POST /approval/check — runtime-block gate. Callers (osmoda-bridge shell_exec,
+/// system.mutate, wallet.send, …) MUST call this before executing a command on
+/// behalf of the agent. Returns `allow=false` with a reason if the command is
+/// destructive and no Approved-matching approval_id was supplied — in which
+/// case the caller must NOT execute and should surface the reason to the
+/// operator (or request approval).
+pub async fn approval_check_command_handler(
+    State(state): State<SharedState>,
+    Json(req): Json<ApprovalCheckRequest>,
+) -> Result<Json<ApprovalCheckResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let gate = state.approval_gate.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "approval gate not enabled"})),
+        )
+    })?;
+    let is_destructive = gate.is_destructive(&req.command);
+    match gate.check_and_reject(&req.command, req.approval_id.as_deref()) {
+        Ok(()) => Ok(Json(ApprovalCheckResponse { allow: true, is_destructive, reason: None })),
+        Err(e) => Ok(Json(ApprovalCheckResponse {
+            allow: false,
+            is_destructive,
+            reason: Some(e.to_string()),
+        })),
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ApprovalDecision {
     pub decided_by: Option<String>,
 }

@@ -1,0 +1,43 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    paths: ['packages/**', 'crates/**', 'scripts/**', 'osmoda-integration-kit/**', '.github/workflows/ci.yml']
+  pull_request:
+jobs:
+  gateway:
+    name: gateway (typecheck + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - working-directory: packages/osmoda-gateway
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+          npx tsc
+          node --test test/
+
+  integration-kit:
+    name: osmoda-integration-kit (typecheck + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - working-directory: osmoda-integration-kit
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+          npx tsc
+          node --test test/
+
+  agentd:
+    name: agentd (cargo check + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check -p agentd
+      - run: cargo test -p agentd --bin agentd approval

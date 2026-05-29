@@ -43,23 +43,32 @@ if (args[0] === "agent") {
   const tf = path.join(sdir, sid + ".trajectory.jsonl");
   const w = (o) => fs.appendFileSync(tf, JSON.stringify(o) + "\\n");
   // Write incrementally with small delays so the driver's poll loop sees growth.
+  // CONFIRMED OpenClaw 2026.5.20 shapes: model.completed.data has
+  // assistantTexts:[string] + cumulative messagesSnapshot; final --json is
+  // { payloads:[{text}], meta:{ finalAssistantVisibleText } }.
   w({ type: "session.started", seq: 1, data: { agentId } });
   setTimeout(() => {
-    w({ type: "model.completed", seq: 2, data: { message: { role: "assistant", content: [
-      { type: "text", text: "Let me check disk usage." },
-      { type: "toolCall", id: "tc1", name: "shell_exec", input: { command: "df -h /" } },
-    ] } } });
+    w({ type: "model.completed", seq: 2, data: {
+      assistantTexts: [],
+      messagesSnapshot: [
+        { role: "user", content: [{ type: "text", text: "how much disk?" }] },
+        { role: "assistant", content: [{ type: "toolCall", name: "shell_exec", input: { command: "df -h /" } }] },
+      ],
+    } });
   }, 250);
   setTimeout(() => {
-    w({ type: "context.compiled", seq: 3, data: { messages: [
-      { role: "toolResult", content: [{ type: "toolResult", id: "tc1", name: "shell_exec", output: "/dev/sda1 40G 12G 28G 30%" }] },
-    ] } });
-    w({ type: "model.completed", seq: 4, data: { message: { role: "assistant", content: [
-      { type: "text", text: "Disk is 30% used." },
-    ] } } });
-    w({ type: "session.ended", seq: 5, data: { status: "ok" } });
-    // Final --json result on stdout (authoritative answer), then exit.
-    process.stdout.write(JSON.stringify({ text: "Disk is 30% used — 12G of 40G." }));
+    w({ type: "model.completed", seq: 3, data: {
+      assistantTexts: ["Disk is 30% used."],
+      messagesSnapshot: [
+        { role: "user", content: [{ type: "text", text: "how much disk?" }] },
+        { role: "assistant", content: [{ type: "toolCall", name: "shell_exec", input: { command: "df -h /" } }] },
+        { role: "toolResult", content: [{ type: "text", text: "/dev/sda1 40G 12G 28G 30%" }] },
+        { role: "assistant", content: [{ type: "text", text: "Disk is 30% used." }] },
+      ],
+    } });
+    w({ type: "session.ended", seq: 4, data: { status: "ok" } });
+    // Final --json (authoritative answer) on stdout, then exit.
+    process.stdout.write(JSON.stringify({ payloads: [{ text: "Disk is 30% used — 12G of 40G." }], meta: { finalAssistantVisibleText: "Disk is 30% used — 12G of 40G." } }));
     process.exit(0);
   }, 600);
   return;

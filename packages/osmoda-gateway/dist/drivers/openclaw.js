@@ -355,6 +355,23 @@ export const openClawDriver = {
         const extractText = (v) => {
             if (!v || typeof v !== "object")
                 return undefined;
+            // CONFIRMED shape (OpenClaw 2026.5.20, funded run): the final --json is
+            // { payloads:[{text}], meta:{ finalAssistantVisibleText, ... } }.
+            if (v.meta && typeof v.meta.finalAssistantVisibleText === "string" && v.meta.finalAssistantVisibleText.trim()) {
+                return v.meta.finalAssistantVisibleText;
+            }
+            if (Array.isArray(v.payloads)) {
+                const joined = v.payloads
+                    .filter((p) => p && typeof p.text === "string" && p.text.trim())
+                    .map((p) => p.text)
+                    .join("\n");
+                if (joined.trim())
+                    return joined;
+            }
+            if (v.meta && typeof v.meta.finalAssistantRawText === "string" && v.meta.finalAssistantRawText.trim()) {
+                return v.meta.finalAssistantRawText;
+            }
+            // Fallbacks (older/alternate builds).
             if (typeof v.text === "string" && v.text.trim())
                 return v.text;
             if (typeof v.reply === "string" && v.reply.trim())

@@ -60,66 +60,57 @@ function toolTargetHint(input: any): string | undefined {
 }
 
 /**
- * Pull assistant content blocks out of a model.completed event's data, probing
- * the plausible locations. Returns { text, toolCalls[] }.
+ * Pull this round's assistant text out of a model.completed event's data.
+ * CONFIRMED on a funded run: OpenClaw 2026.5.20 puts the round's assistant text
+ * in `data.assistantTexts` (string[]). Falls back to older probed shapes.
  */
-function extractRound(data: any): { text: string; toolCalls: Array<{ id?: string; name: string; input?: any }> } {
-  let text = "";
-  const toolCalls: Array<{ id?: string; name: string; input?: any }> = [];
-  if (!data || typeof data !== "object") return { text, toolCalls };
-
-  // Candidate containers for the assistant message / content blocks.
-  const candidates: any[] = [
-    data.message, data.assistant, data.response, data.output, data.result,
-    data.messages, data.content,
-  ].filter(Boolean);
-
-  const blocks: any[] = [];
-  for (const c of candidates) {
+function extractRoundText(data: any): string {
+  if (!data || typeof data !== "object") return "";
+  if (Array.isArray(data.assistantTexts) && data.assistantTexts.length) {
+    return data.assistantTexts.filter((s: any) => typeof s === "string").join("\n");
+  }
+  // Fallbacks (defensive — older/alternate builds).
+  for (const c of [data.message, data.assistant, data.output, data.content]) {
     for (const m of asArray(c)) {
-      if (typeof m === "string") { text += m; continue; }
-      if (!m || typeof m !== "object") continue;
-      // a message with role:assistant + content[]; or a raw content block
-      if (m.role && m.role !== "assistant") continue;
-      const content = m.content != null ? m.content : m;
-      for (const b of asArray(content)) blocks.push(b);
+      if (typeof m === "string") return m;
+      const content = m && (m.content != null ? m.content : m);
+      const joined = asArray(content).filter((b: any) => b && b.type === "text" && b.text).map((b: any) => b.text).join("");
+      if (joined) return joined;
     }
   }
-  for (const b of blocks) {
-    if (typeof b === "string") { text += b; continue; }
-    if (!b || typeof b !== "object") continue;
-    const bt = b.type || b.kind || (b.role === "toolResult" ? "toolResult" : "");
-    if (bt === "text" && typeof b.text === "string") text += b.text;
-    else if ((bt === "toolCall" || bt === "tool_use") && (b.name || b.toolName)) {
-      toolCalls.push({ id: b.id || b.toolCallId, name: b.name || b.toolName, input: b.input || b.args || b.arguments });
-    } else if (typeof b.text === "string") {
-      text += b.text;
-    }
-  }
-  return { text, toolCalls };
+  return "";
 }
 
-/** Pull tool RESULTS out of a context.compiled event's messages array. */
-function extractToolResults(data: any): Array<{ id?: string; name?: string; outcome?: string; summary?: string }> {
-  const out: Array<{ id?: string; name?: string; outcome?: string; summary?: string }> = [];
-  const msgs = asArray(data && data.messages);
-  for (const m of msgs) {
-    if (!m || typeof m !== "object") continue;
-    const role = m.role || m.type;
-    const content = m.content != null ? m.content : m;
-    for (const b of asArray(content)) {
+/**
+ * Walk a model.completed event's `messagesSnapshot` (the cumulative conversation)
+ * and emit tool calls + results with their POSITIONAL index as the de-dup key
+ * (the snapshot has no per-block ids and is re-sent in full each round).
+ * CONFIRMED shape: messages = [{role:"assistant", content:[{type:"toolCall",
+ * name, input}|{type:"text"}]}, {role:"toolResult", content:[{type:"text"}]}].
+ */
+function extractSnapshotTools(data: any): Array<
+  | { kind: "use"; idx: number; name: string; input?: any }
+  | { kind: "result"; idx: number; name?: string; outcome: string; summary: string }
+> {
+  const out: any[] = [];
+  const msgs = asArray(data && data.messagesSnapshot);
+  msgs.forEach((m: any, i: number) => {
+    if (!m || typeof m !== "object") return;
+    const role = m.role;
+    for (const b of asArray(m.content)) {
       if (!b || typeof b !== "object") continue;
-      const bt = b.type || b.role || b.kind;
-      if (role === "toolResult" || bt === "toolResult" || bt === "tool_result") {
-        const raw = typeof b.output === "string" ? b.output
+      const bt = b.type;
+      if (role === "assistant" && (bt === "toolCall" || bt === "tool_use") && (b.name || b.toolName)) {
+        out.push({ kind: "use", idx: i, name: b.name || b.toolName, input: b.input || b.args || b.arguments });
+      } else if (role === "toolResult") {
+        const raw = typeof b.text === "string" ? b.text
+          : typeof b.output === "string" ? b.output
           : typeof b.result === "string" ? b.result
-          : typeof b.text === "string" ? b.text
           : JSON.stringify(b.output || b.result || "");
-        const summary = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 120);
-        out.push({ id: b.id || b.toolCallId, name: b.name || b.toolName, outcome: b.isError || b.error ? "error" : "success", summary });
+        out.push({ kind: "result", idx: i, name: b.name || b.toolName, outcome: (b.isError || b.error) ? "error" : "success", summary: String(raw || "").replace(/\s+/g, " ").trim().slice(0, 120) });
       }
     }
-  }
+  });
   return out;
 }
 
@@ -137,32 +128,32 @@ export function mapTrajectoryEvent(ev: any, state: TrajectoryState): AgentEvent[
     return out;
   }
 
-  if (type === "context.compiled") {
-    // Tool results from the prior round surface here.
-    for (const r of extractToolResults(ev.data)) {
-      const key = r.id || `${r.name}:${state.seenToolResultIds.size}`;
-      if (state.seenToolResultIds.has(key)) continue;
-      state.seenToolResultIds.add(key);
-      out.push({ type: "tool_result", name: r.name, outcome: r.outcome, summary: r.summary });
-    }
-    return out;
-  }
-
   if (type === "model.completed") {
     state.round += 1;
     out.push({ type: "status", step: state.round > 1 ? `Working · round ${state.round}` : "Thinking" });
-    const { text, toolCalls } = extractRound(ev.data);
-    for (const tc of toolCalls) {
-      const key = tc.id || `${tc.name}:${state.seenToolCallIds.size}`;
-      if (state.seenToolCallIds.has(key)) continue;
-      state.seenToolCallIds.add(key);
-      out.push({ type: "tool_use", name: tc.name, target: toolTargetHint(tc.input), round: state.round - 1 });
+    // Tool calls + results live in the cumulative messagesSnapshot; de-dup by
+    // positional index so re-sent snapshots don't re-emit earlier steps.
+    for (const t of extractSnapshotTools(ev.data)) {
+      if (t.kind === "use") {
+        const key = "tc:" + t.idx;
+        if (state.seenToolCallIds.has(key)) continue;
+        state.seenToolCallIds.add(key);
+        out.push({ type: "tool_use", name: t.name, target: toolTargetHint(t.input), round: state.round - 1 });
+      } else {
+        const key = "tr:" + t.idx;
+        if (state.seenToolResultIds.has(key)) continue;
+        state.seenToolResultIds.add(key);
+        out.push({ type: "tool_result", name: t.name, outcome: t.outcome, summary: t.summary });
+      }
     }
-    // Round text is reasoning-between-tools → the collapsible thinking panel.
-    // The authoritative final answer is emitted by the driver as text_bulk.
-    if (text) {
-      out.push({ type: "interim_text", text });
-      state.emittedInterim += text.length;
+    // Round assistant text → the collapsible thinking panel. The authoritative
+    // final answer is emitted separately by the driver as text_bulk. Only emit
+    // the DELTA beyond what we've already streamed (assistantTexts is cumulative).
+    const text = extractRoundText(ev.data);
+    if (text && text.length > state.emittedInterim) {
+      const delta = text.slice(state.emittedInterim);
+      out.push({ type: "interim_text", text: delta });
+      state.emittedInterim = text.length;
     }
     return out;
   }

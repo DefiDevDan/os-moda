@@ -1930,13 +1930,26 @@ function connect() {
         // dashboard action log shows WHAT the tool did, not just its name.
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name, type: "tool_use", target: msg.target } } }));
       } else if (msg.type === "tool_result") {
-        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_result", data: { outcome: msg.outcome } } }));
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_result", data: { name: msg.name, outcome: msg.outcome, summary: msg.summary } } }));
+      // ── agentic-chat-interface contract (forward verbatim) ──
+      } else if (msg.type === "text_bulk") {
+        if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "text_bulk", data: { content: msg.text } } }));
+      } else if (msg.type === "interim_text") {
+        if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "interim_text", data: { content: msg.text } } }));
+      } else if (msg.type === "interim_commit_final") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "interim_commit_final", data: { length: msg.length } } }));
+      } else if (msg.type === "status") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "status", data: { step: msg.step } } }));
+      } else if (msg.type === "phase") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "phase", data: { phase: msg.phase } } }));
       } else if (msg.type === "done") {
         if (ccLifecycleStarted) { upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "end" } } })); }
         ccLifecycleStarted = false;
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "end" } }));
       } else if (msg.type === "error") {
-        upstream.send(JSON.stringify({ type: "event", event: "error", payload: { message: msg.text } }));
+        upstream.send(JSON.stringify({ type: "event", event: "error", payload: { message: msg.text, code: msg.code } }));
       }
     });
     local.on("close", () => {

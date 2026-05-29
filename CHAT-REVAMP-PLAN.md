@@ -1,6 +1,36 @@
 # Chat revamp plan — port the `agentic-chat-interface` skill to osModa
 
-> Status: **PLAN for review.** Nothing built yet. Target: the server chat at
+> ## EXECUTION STATUS (2026-05-29)
+> **Shipped + deployed** (gateway/relay committed to repo; apps/spawn deployed via push.sh):
+> - **P1 ✓** Event contract (`types.ts`) + OpenClaw trajectory-tail streaming
+>   (`openclaw-trajectory.ts` mapper, 9 unit tests) + driver tail in `openclaw.ts`.
+>   text_bulk + interim_commit_final de-dup. Gateway healthy on the box.
+> - **P2 ✓** ws-relay forwards the contract verbatim; spawn-app broadcasts; gateway
+>   pipeEvent forwards; transcript persists answer + tool steps.
+> - **P3 ✓** Front-end consume: status pill, phase, interim_text→collapsible
+>   Thinking panel, interim_commit_final trim, text_bulk→clean answer.
+> - **P4 ✓** TOOL_META tone registry (consolidated from TOOL_VERB_MAP) + numbered
+>   step badges + tone-coloured rings on the existing rich tool timeline. Two text
+>   channels (thinking vs answer).
+> - **P5 ✓** Per-code error rendering + right CTA (restart / retry / Open Engine)
+>   + retryLastChat. Stall watchdog, abort, completion chip, welcome empty-state
+>   pre-existed.
+> - **P6 ✓ (inherited)** loadDashChatHistory rebuilds tool steps + final answer
+>   from the canonical transcript; single-source render (no double-render).
+>
+> **NOT yet verified — the one hard blocker:** live token-by-token stream on a
+> real turn. The box's Anthropic credential is **usage-capped** (every test turn
+> dies "out of extra usage"). Per the goal's own constraint, the backend is
+> built + unit-tested + deployed and this is flagged rather than claimed verified.
+> Fund/uncap the key → one real multi-round turn confirms stream + tool timeline.
+>
+> **Honest granularity note:** OpenClaw streams PER-ROUND (trajectory flush
+> granularity), not per-token; the rAF reveal makes per-round text feel streamed.
+> claude-code remains token-level.
+
+---
+
+> Status: **PLAN (executed — see status above).** Target: the server chat at
 > `https://spawn.os.moda/#/servers/:id/chat`. Reference: the user's
 > `agentic-chat-interface` skill (LIRR `/paieska`). Goal: streaming, Manus-like
 > live tool timeline, real stop/abort, graceful errors, no glitches.

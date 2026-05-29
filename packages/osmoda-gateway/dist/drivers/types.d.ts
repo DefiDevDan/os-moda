@@ -37,19 +37,35 @@ export interface AgentProfile {
     enabled: boolean;
     updated_at: string;
 }
+/**
+ * The osModa streaming chat event contract — adapted from the
+ * agentic-chat-interface skill (AGENTIC-CHAT-INTERFACE-SKILL.md §1). ONE
+ * contract: every runtime driver emits these; the ws-relay forwards them
+ * verbatim; the dashboard consumes them. Two text channels (interim_text vs
+ * text) keep planning/reasoning separate from the final answer — never
+ * collapse them (skill §8).
+ */
 export interface AgentEvent {
-    type: "text" | "tool_use" | "tool_result" | "thinking" | "session" | "error" | "done";
+    type: "text" | "text_bulk" | "interim_text" | "interim_commit_final" | "tool_use" | "tool_result" | "status" | "phase" | "thinking" | "session" | "error" | "done";
     text?: string;
     name?: string;
     /**
      * For tool_use: a short human-readable hint of WHAT the tool is acting on —
      * a command preview, file path, URL, or query. Lets the chat UI show
-     * "Bash · cat /var/log/…" instead of a bare "Bash" badge, so users can
-     * actually follow what the agent is doing.
+     * "Bash · cat /var/log/…" instead of a bare "Bash" badge.
      */
     target?: string;
     /** For tool_result: "success" | "error" when known. */
     outcome?: string;
+    /** For tool_result: a one-line result summary ("→ 12 found"). */
+    summary?: string;
+    /** For status: the pill text. For phase: the phase name. */
+    step?: string;
+    phase?: "planning" | "answering";
+    /** For interim_commit_final: how many trailing interim chars to trim. */
+    length?: number;
+    /** For tool_use/result: the agentic round index (0-based). */
+    round?: number;
     sessionId?: string;
     code?: string;
 }

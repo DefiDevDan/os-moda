@@ -351,6 +351,16 @@ wss.on("connection", (ws, req) => {
         if (event.type === "text" && event.text) {
           turnText += event.text;
           hadOutput = true;
+        } else if (event.type === "text_bulk" && event.text) {
+          // Authoritative final answer (openclaw) — replace the accumulator so
+          // the persisted transcript holds the clean answer, not the interim.
+          turnText = event.text;
+          hadOutput = true;
+        } else if (event.type === "interim_text") {
+          // Planning/thinking text — streamed to the client live but NOT the
+          // canonical answer; don't pollute turnText. (Counts as output so a
+          // credential-error fallback isn't triggered after real progress.)
+          hadOutput = true;
         } else if (event.type === "tool_use") {
           flushAssistant();
           transcripts.append(agent.id, sessionKey, {
@@ -428,10 +438,21 @@ function pipeEvent(ws: WebSocket, event: AgentEvent, sessionKey: string, runtime
   switch (event.type) {
     case "text":
       ws.send(JSON.stringify({ type: "text", text: event.text })); break;
+    // Streaming chat contract (agentic-chat-interface skill §1) — forward verbatim.
+    case "text_bulk":
+      ws.send(JSON.stringify({ type: "text_bulk", text: event.text })); break;
+    case "interim_text":
+      ws.send(JSON.stringify({ type: "interim_text", text: event.text })); break;
+    case "interim_commit_final":
+      ws.send(JSON.stringify({ type: "interim_commit_final", length: event.length })); break;
+    case "status":
+      ws.send(JSON.stringify({ type: "status", step: event.step })); break;
+    case "phase":
+      ws.send(JSON.stringify({ type: "phase", phase: event.phase })); break;
     case "tool_use":
-      ws.send(JSON.stringify({ type: "tool_use", name: event.name, target: event.target })); break;
+      ws.send(JSON.stringify({ type: "tool_use", name: event.name, target: event.target, round: event.round })); break;
     case "tool_result":
-      ws.send(JSON.stringify({ type: "tool_result", outcome: event.outcome })); break;
+      ws.send(JSON.stringify({ type: "tool_result", name: event.name, outcome: event.outcome, summary: event.summary })); break;
     case "thinking":
       ws.send(JSON.stringify({ type: "thinking", text: event.text })); break;
     case "session":

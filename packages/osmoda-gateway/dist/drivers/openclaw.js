@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { mapTrajectoryEvent, newTrajectoryState } from "./openclaw-trajectory.js";
 const OPENCLAW_CANDIDATES = [
     process.env.OPENCLAW_PATH,
     "/opt/openclaw/node_modules/.bin/openclaw",
@@ -375,22 +376,70 @@ export const openClawDriver = {
             }
             return undefined;
         };
-        const code = await new Promise((resolve) => {
-            proc.on("close", (c) => resolve(c ?? 1));
-            // Parity with claude-code: 8h hard cap, env-overridable. The Stop button
-            // (abortSignal → SIGTERM the group) is the user's real kill switch.
-            const hardCapMs = parseInt(process.env.OSMODA_CHAT_HARD_CAP_MS || "28800000", 10);
-            setTimeout(() => {
-                const pid = proc.pid;
-                if (typeof pid === "number") {
-                    try {
-                        process.kill(-pid, "SIGKILL");
+        // ── Live streaming via trajectory tail (the openclaw "streaming" fix) ──
+        // `openclaw agent --json` only returns the final blob, but the run writes
+        // an append-only trajectory JSONL as it executes. We poll it while the
+        // child runs and emit contract events (status / tool_use / tool_result /
+        // interim_text) per round — see openclaw-trajectory.ts for the rationale +
+        // honest granularity note (per-round, not per-token).
+        const trajPath = path.join("/root/.openclaw/agents", opts.agent.id.replace(/[^A-Za-z0-9_.:-]/g, "_"), "sessions", sessionKey.replace(/[^A-Za-z0-9_.:-]/g, "_") + ".trajectory.jsonl");
+        const trajState = newTrajectoryState();
+        let trajOffset = 0;
+        let trajBuf = "";
+        const readNewTrajectoryEvents = () => {
+            const evs = [];
+            try {
+                const stat = fs.statSync(trajPath);
+                if (stat.size > trajOffset) {
+                    const fd = fs.openSync(trajPath, "r");
+                    const len = stat.size - trajOffset;
+                    const b = Buffer.alloc(len);
+                    fs.readSync(fd, b, 0, len, trajOffset);
+                    fs.closeSync(fd);
+                    trajOffset = stat.size;
+                    trajBuf += b.toString("utf8");
+                    let nl;
+                    while ((nl = trajBuf.indexOf("\n")) !== -1) {
+                        const line = trajBuf.slice(0, nl);
+                        trajBuf = trajBuf.slice(nl + 1);
+                        if (!line.trim())
+                            continue;
+                        try {
+                            evs.push(...mapTrajectoryEvent(JSON.parse(line), trajState));
+                        }
+                        catch { /* partial/garbage line */ }
                     }
-                    catch { /* already gone */ }
                 }
-                resolve(124);
-            }, hardCapMs);
-        });
+            }
+            catch { /* file not created yet (ENOENT) — fine */ }
+            return evs;
+        };
+        let closed = false;
+        let exitCode = 1;
+        proc.on("close", (c) => { closed = true; exitCode = c ?? 1; });
+        // Hard cap (parity w/ claude-code): SIGKILL the group after 8h → close fires.
+        const hardCapMs = parseInt(process.env.OSMODA_CHAT_HARD_CAP_MS || "28800000", 10);
+        const hardCapTimer = setTimeout(() => {
+            const pid = proc.pid;
+            if (typeof pid === "number") {
+                try {
+                    process.kill(-pid, "SIGKILL");
+                }
+                catch { /* gone */ }
+            }
+        }, hardCapMs);
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        // Stream loop: drain new trajectory events every ~400ms until the child
+        // exits, then one final drain to catch trailing lines.
+        while (!closed) {
+            for (const e of readNewTrajectoryEvents())
+                yield e;
+            await sleep(400);
+        }
+        clearTimeout(hardCapTimer);
+        for (const e of readNewTrajectoryEvents())
+            yield e;
+        const code = exitCode;
         // Parse the accumulated stdout. Try whole-buffer JSON first (the common
         // `--json` single-object case), then fall back to NDJSON line scan,
         // then to raw text.
@@ -419,7 +468,14 @@ export const openClawDriver = {
                 replyText = trimmed;
         }
         if (replyText) {
-            yield { type: "text", text: replyText };
+            // The authoritative final answer. If we streamed interim/round text into
+            // the thinking panel, tell the client to trim it (skill §1 de-dup), then
+            // replace the answer wholesale. text_bulk → clean final bubble.
+            if (trajState.emittedInterim > 0) {
+                yield { type: "interim_commit_final", length: trajState.emittedInterim };
+            }
+            yield { type: "text_bulk", text: replyText };
+            yield { type: "phase", phase: "answering" };
             hasOutput = true;
         }
         if (code !== 0 && !hasOutput && !opts.abortSignal?.aborted) {

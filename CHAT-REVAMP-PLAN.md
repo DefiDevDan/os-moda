@@ -18,11 +18,16 @@
 > - **P6 ✓ (inherited)** loadDashChatHistory rebuilds tool steps + final answer
 >   from the canonical transcript; single-source render (no double-render).
 >
-> **NOT yet verified — the one hard blocker:** live token-by-token stream on a
-> real turn. The box's Anthropic credential is **usage-capped** (every test turn
-> dies "out of extra usage"). Per the goal's own constraint, the backend is
-> built + unit-tested + deployed and this is flagged rather than claimed verified.
-> Fund/uncap the key → one real multi-round turn confirms stream + tool timeline.
+> **LIVE-VERIFIED (2026-05-29).** A funded `sk-ant-api03` credential was already
+> on the box (the earlier failures were the capped `sk-ant-oat01` subscription).
+> A real turn through the gateway WS pipeline streamed the full contract in
+> order: `status → tool_use:system_health → tool_result:success → interim_text →
+> (round 2) tool_use/tool_result → interim_commit_final → text_bulk → phase →
+> done` — tools stream BEFORE the final answer; first content at ~1.5s. This
+> required fixing both extractors to the REAL OpenClaw 2026.5.20 shapes
+> (assistantTexts + messagesSnapshot for the trajectory; payloads[].text +
+> meta.finalAssistantVisibleText for the final JSON) — the prior shape-sampling
+> was on capped runs. 12 tests green; deployed.
 >
 > **Honest granularity note:** OpenClaw streams PER-ROUND (trajectory flush
 > granularity), not per-token; the rAF reveal makes per-round text feel streamed.

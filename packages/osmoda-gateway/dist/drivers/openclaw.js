@@ -16,14 +16,16 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { mapTrajectoryEvent, newTrajectoryState } from "./openclaw-trajectory.js";
-const OPENCLAW_CANDIDATES = [
-    process.env.OPENCLAW_PATH,
-    "/opt/openclaw/node_modules/.bin/openclaw",
-    "/usr/local/bin/openclaw",
-    "/run/current-system/sw/bin/openclaw",
-].filter(Boolean);
 function findOpenClawBinary() {
-    for (const p of OPENCLAW_CANDIDATES) {
+    // Read OPENCLAW_PATH at CALL time (not module-load) — the env can be set
+    // after import (e.g. by tests) and may change across runs.
+    const candidates = [
+        process.env.OPENCLAW_PATH,
+        "/opt/openclaw/node_modules/.bin/openclaw",
+        "/usr/local/bin/openclaw",
+        "/run/current-system/sw/bin/openclaw",
+    ].filter(Boolean);
+    for (const p of candidates) {
         try {
             fs.accessSync(p, fs.constants.X_OK);
             return p;
@@ -32,6 +34,12 @@ function findOpenClawBinary() {
     }
     return null;
 }
+// Base dir for OpenClaw per-agent state (auth profiles + session trajectories).
+// Overridable via OPENCLAW_AGENTS_DIR so the driver is testable off-box (the
+// integration test points it at a temp dir + a simulated openclaw binary).
+function agentsBaseDir() {
+    return process.env.OPENCLAW_AGENTS_DIR || "/root/.openclaw/agents";
+}
 // Serialize auth-profile writes per agent — two concurrent sessions with
 // different credentials would otherwise race on the same file and a chat
 // could land on the other user's credential.
@@ -39,7 +47,7 @@ const authWriteLocks = new Map();
 function writeAuthProfile(agentId, cred) {
     const prev = authWriteLocks.get(agentId) || Promise.resolve();
     const next = prev.then(async () => {
-        const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+        const dir = path.join(agentsBaseDir(), agentId, "agent");
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         // OpenClaw 2026.5+ auth store shape (AuthProfileSecretsStore):
         //   { version: 1, profiles: { "<profileId>": <AuthProfileCredential> } }
@@ -79,7 +87,7 @@ function ensureAgentRegistered(bin, agentId, workspace) {
             const present = new RegExp(`(^|\\n)\\s*-\\s+${agentId}\\b`).test(out) || agentId === "main";
             if (present)
                 return resolve();
-            const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+            const dir = path.join(agentsBaseDir(), agentId, "agent");
             const add = spawn(bin, ["agents", "add", agentId, "--non-interactive", "--workspace", workspace, "--agent-dir", dir], { stdio: ["ignore", "ignore", "ignore"] });
             add.on("close", () => resolve());
             add.on("error", () => resolve());
@@ -382,7 +390,7 @@ export const openClawDriver = {
         // child runs and emit contract events (status / tool_use / tool_result /
         // interim_text) per round — see openclaw-trajectory.ts for the rationale +
         // honest granularity note (per-round, not per-token).
-        const trajPath = path.join("/root/.openclaw/agents", opts.agent.id.replace(/[^A-Za-z0-9_.:-]/g, "_"), "sessions", sessionKey.replace(/[^A-Za-z0-9_.:-]/g, "_") + ".trajectory.jsonl");
+        const trajPath = path.join(agentsBaseDir(), opts.agent.id.replace(/[^A-Za-z0-9_.:-]/g, "_"), "sessions", sessionKey.replace(/[^A-Za-z0-9_.:-]/g, "_") + ".trajectory.jsonl");
         const trajState = newTrajectoryState();
         let trajOffset = 0;
         let trajBuf = "";

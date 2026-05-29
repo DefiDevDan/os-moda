@@ -27,18 +27,26 @@ import type {
 } from "./types.js";
 import { mapTrajectoryEvent, newTrajectoryState } from "./openclaw-trajectory.js";
 
-const OPENCLAW_CANDIDATES = [
-  process.env.OPENCLAW_PATH,
-  "/opt/openclaw/node_modules/.bin/openclaw",
-  "/usr/local/bin/openclaw",
-  "/run/current-system/sw/bin/openclaw",
-].filter(Boolean) as string[];
-
 function findOpenClawBinary(): string | null {
-  for (const p of OPENCLAW_CANDIDATES) {
+  // Read OPENCLAW_PATH at CALL time (not module-load) — the env can be set
+  // after import (e.g. by tests) and may change across runs.
+  const candidates = [
+    process.env.OPENCLAW_PATH,
+    "/opt/openclaw/node_modules/.bin/openclaw",
+    "/usr/local/bin/openclaw",
+    "/run/current-system/sw/bin/openclaw",
+  ].filter(Boolean) as string[];
+  for (const p of candidates) {
     try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* next */ }
   }
   return null;
+}
+
+// Base dir for OpenClaw per-agent state (auth profiles + session trajectories).
+// Overridable via OPENCLAW_AGENTS_DIR so the driver is testable off-box (the
+// integration test points it at a temp dir + a simulated openclaw binary).
+function agentsBaseDir(): string {
+  return process.env.OPENCLAW_AGENTS_DIR || "/root/.openclaw/agents";
 }
 
 // Serialize auth-profile writes per agent — two concurrent sessions with
@@ -49,7 +57,7 @@ const authWriteLocks = new Map<string, Promise<void>>();
 function writeAuthProfile(agentId: string, cred: Credential): Promise<void> {
   const prev = authWriteLocks.get(agentId) || Promise.resolve();
   const next = prev.then(async () => {
-    const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+    const dir = path.join(agentsBaseDir(), agentId, "agent");
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     // OpenClaw 2026.5+ auth store shape (AuthProfileSecretsStore):
     //   { version: 1, profiles: { "<profileId>": <AuthProfileCredential> } }
@@ -90,7 +98,7 @@ function ensureAgentRegistered(bin: string, agentId: string, workspace: string):
       // Match "- <id>" lines from `agents list`. `main` always exists.
       const present = new RegExp(`(^|\\n)\\s*-\\s+${agentId}\\b`).test(out) || agentId === "main";
       if (present) return resolve();
-      const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+      const dir = path.join(agentsBaseDir(), agentId, "agent");
       const add = spawn(
         bin,
         ["agents", "add", agentId, "--non-interactive", "--workspace", workspace, "--agent-dir", dir],
@@ -373,7 +381,7 @@ export const openClawDriver: RuntimeDriver = {
     // interim_text) per round — see openclaw-trajectory.ts for the rationale +
     // honest granularity note (per-round, not per-token).
     const trajPath = path.join(
-      "/root/.openclaw/agents",
+      agentsBaseDir(),
       opts.agent.id.replace(/[^A-Za-z0-9_.:-]/g, "_"),
       "sessions",
       sessionKey.replace(/[^A-Za-z0-9_.:-]/g, "_") + ".trajectory.jsonl",

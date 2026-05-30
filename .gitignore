@@ -96,3 +96,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+
+# Separate publishable SDK repo — ships independently, not vendored here
+osmoda-integration-kit/

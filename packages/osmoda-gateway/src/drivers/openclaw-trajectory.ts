@@ -89,27 +89,31 @@ function extractRoundText(data: any): string {
  * name, input}|{type:"text"}]}, {role:"toolResult", content:[{type:"text"}]}].
  */
 function extractSnapshotTools(data: any): Array<
-  | { kind: "use"; idx: number; name: string; input?: any }
-  | { kind: "result"; idx: number; name?: string; outcome: string; summary: string }
+  | { kind: "use"; key: string; name: string; input?: any }
+  | { kind: "result"; key: string; name?: string; outcome: string; summary: string }
 > {
   const out: any[] = [];
   const msgs = asArray(data && data.messagesSnapshot);
   msgs.forEach((m: any, i: number) => {
     if (!m || typeof m !== "object") return;
     const role = m.role;
-    for (const b of asArray(m.content)) {
-      if (!b || typeof b !== "object") continue;
+    // De-dup key is message-index + block-index: one assistant message can carry
+    // MULTIPLE toolCall blocks (parallel tool use). Keying on the message index
+    // alone collapsed them to one tool_use while every result still emitted —
+    // producing the "6 results for 1 call" orphan storm in the timeline.
+    asArray(m.content).forEach((b: any, bi: number) => {
+      if (!b || typeof b !== "object") return;
       const bt = b.type;
       if (role === "assistant" && (bt === "toolCall" || bt === "tool_use") && (b.name || b.toolName)) {
-        out.push({ kind: "use", idx: i, name: b.name || b.toolName, input: b.input || b.args || b.arguments });
+        out.push({ kind: "use", key: i + ":" + bi, name: b.name || b.toolName, input: b.input || b.args || b.arguments });
       } else if (role === "toolResult") {
         const raw = typeof b.text === "string" ? b.text
           : typeof b.output === "string" ? b.output
           : typeof b.result === "string" ? b.result
           : JSON.stringify(b.output || b.result || "");
-        out.push({ kind: "result", idx: i, name: b.name || b.toolName, outcome: (b.isError || b.error) ? "error" : "success", summary: String(raw || "").replace(/\s+/g, " ").trim().slice(0, 120) });
+        out.push({ kind: "result", key: i + ":" + bi, name: b.name || b.toolName, outcome: (b.isError || b.error) ? "error" : "success", summary: String(raw || "").replace(/\s+/g, " ").trim().slice(0, 120) });
       }
-    }
+    });
   });
   return out;
 }
@@ -135,12 +139,12 @@ export function mapTrajectoryEvent(ev: any, state: TrajectoryState): AgentEvent[
     // positional index so re-sent snapshots don't re-emit earlier steps.
     for (const t of extractSnapshotTools(ev.data)) {
       if (t.kind === "use") {
-        const key = "tc:" + t.idx;
+        const key = "tc:" + t.key;
         if (state.seenToolCallIds.has(key)) continue;
         state.seenToolCallIds.add(key);
         out.push({ type: "tool_use", name: t.name, target: toolTargetHint(t.input), round: state.round - 1 });
       } else {
-        const key = "tr:" + t.idx;
+        const key = "tr:" + t.key;
         if (state.seenToolResultIds.has(key)) continue;
         state.seenToolResultIds.add(key);
         out.push({ type: "tool_result", name: t.name, outcome: t.outcome, summary: t.summary });

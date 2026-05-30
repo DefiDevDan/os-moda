@@ -403,7 +403,15 @@ export const openClawDriver: RuntimeDriver = {
       sessionKey.replace(/[^A-Za-z0-9_.:-]/g, "_") + ".trajectory.jsonl",
     );
     const trajState = newTrajectoryState();
+    // CRITICAL: a RESUMED session (--session-id) reuses the SAME trajectory file,
+    // which is append-only and already holds every prior turn's rounds. If we
+    // tailed from byte 0 we'd re-emit all of that history as tool_use/interim_text
+    // every turn — the "same messages over and over" bug. So seek past the
+    // pre-existing content and stream only THIS turn's appended lines. (OpenClaw's
+    // multi-second boot means the new turn hasn't written yet when we stat, so we
+    // never drop the current turn's events; a brand-new session has no file → 0.)
     let trajOffset = 0;
+    try { trajOffset = fs.statSync(trajPath).size; } catch { /* new session, file not created yet */ }
     let trajBuf = "";
     const readNewTrajectoryEvents = (): AgentEvent[] => {
       const evs: AgentEvent[] = [];

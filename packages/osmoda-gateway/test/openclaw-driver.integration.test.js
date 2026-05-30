@@ -124,3 +124,48 @@ test("openclaw driver streams the contract from a simulated run (no credits)", a
   // Ordering: tool_use before its text_bulk (live stream precedes final answer).
   assert.ok(types.indexOf("tool_use") < types.indexOf("text_bulk"), "tools stream before the final answer");
 });
+
+test("resumed session does NOT replay prior turns' trajectory (regression: same-messages-over-and-over)", async () => {
+  const agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-agents-"));
+  process.env.OPENCLAW_AGENTS_DIR = agentsDir;
+  const bin = makeFakeOpenclaw(agentsDir);
+  process.env.OPENCLAW_PATH = bin;
+
+  // Simulate a RESUMED session: the trajectory file already holds a prior turn's
+  // rounds (a stale tool call + stale answer). The driver must NOT re-emit these.
+  const sdir = path.join(agentsDir, "osmoda", "sessions");
+  fs.mkdirSync(sdir, { recursive: true });
+  const tf = path.join(sdir, "resumed-session-1.trajectory.jsonl");
+  fs.writeFileSync(tf,
+    JSON.stringify({ type: "session.started", seq: 1, data: { agentId: "osmoda" } }) + "\n" +
+    JSON.stringify({ type: "model.completed", seq: 2, data: {
+      assistantTexts: ["STALE answer from a previous turn."],
+      messagesSnapshot: [
+        { role: "assistant", content: [{ type: "toolCall", name: "STALE_TOOL", input: { command: "echo stale" } }] },
+        { role: "toolResult", content: [{ type: "text", text: "stale result" }] },
+      ],
+    } }) + "\n",
+  );
+
+  const opts = {
+    agent: { id: "osmoda", display_name: "t", runtime: "openclaw", credential_id: "c", model: "claude-opus-4-7", channels: [], enabled: true, updated_at: "" },
+    credential: { id: "c", label: "k", provider: "anthropic", type: "api_key", secret: "sk-ant-api-XXXX", created_at: "" },
+    model: "claude-opus-4-7",
+    systemPrompt: "you are test",
+    mcpConfigPath: "/dev/null",
+    message: "fresh question",
+    sessionId: "resumed-session-1",
+    workingDir: agentsDir,
+  };
+
+  const got = [];
+  for await (const ev of openClawDriver.startSession(opts)) got.push(ev);
+
+  // The fake binary appends THIS turn's content (shell_exec + "Disk is 30% used.")
+  // to the same file. We must see the NEW tool call, never the stale one.
+  const toolNames = got.filter((e) => e.type === "tool_use").map((e) => e.name);
+  assert.ok(!toolNames.includes("STALE_TOOL"), "must NOT replay the prior turn's tool call");
+  assert.ok(toolNames.includes("shell_exec"), "must stream THIS turn's tool call");
+  const interim = got.filter((e) => e.type === "interim_text").map((e) => e.text).join("");
+  assert.ok(!/STALE answer/.test(interim), "must NOT replay the prior turn's interim text");
+});

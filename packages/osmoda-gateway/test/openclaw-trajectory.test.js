@@ -59,6 +59,28 @@ test("cumulative snapshot re-sent next round does NOT re-emit earlier tool steps
   assert.equal(b.find((e) => e.type === "tool_use").name, "service_status");
 });
 
+test("parallel tool calls in ONE assistant message all emit (regression: orphan-result storm)", () => {
+  // OpenClaw can put MULTIPLE toolCall blocks in a single assistant message
+  // (parallel tool use), followed by one toolResult message per call. Keying
+  // de-dup on message index alone collapsed the calls to one while every result
+  // emitted — "6 results for 1 call". Block-index keying fixes it.
+  const { out } = run([modelCompleted([
+    { role: "assistant", content: [
+      { type: "toolCall", name: "file_read", input: { path: "/a" } },
+      { type: "toolCall", name: "file_read", input: { path: "/b" } },
+      { type: "toolCall", name: "file_read", input: { path: "/c" } },
+    ] },
+    { role: "toolResult", content: [{ type: "text", text: "a" }] },
+    { role: "toolResult", content: [{ type: "text", text: "b" }] },
+    { role: "toolResult", content: [{ type: "text", text: "c" }] },
+  ], [])]);
+  const uses = out.filter((e) => e.type === "tool_use");
+  const results = out.filter((e) => e.type === "tool_result");
+  assert.equal(uses.length, 3, "all three parallel calls emit a tool_use");
+  assert.equal(results.length, 3, "results match calls 1:1 — no orphan storm");
+  assert.deepEqual(uses.map((u) => u.target), ["/a", "/b", "/c"]);
+});
+
 test("toolResult error flag → outcome 'error'", () => {
   const { out } = run([modelCompleted([
     { role: "toolResult", content: [{ type: "text", text: "ENOENT", isError: true }] },

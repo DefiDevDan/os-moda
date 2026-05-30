@@ -1,0 +1,24 @@
+GOAL: revamp the spawn.os.moda server chat into a production-grade streaming agentic interface.
+
+TARGET: route #/servers/:id/chat.
+READ FIRST (mandatory): AGENTIC-CHAT-INTERFACE-SKILL.md (canonical pattern: event contract, consume loop, animations, resilience, anti-patterns) + CHAT-REVAMP-PLAN.md (osModa port) — both at repo root. Apply code-simplifier principles (anthropics/claude-plugins-official): preserve behaviour, ONE contract, no nested ternaries, keep "why" comments, scope discipline.
+
+REPO /Users/admin/Desktop/molt-os (bolivian-peru/os-moda; commit+push code). apps/spawn/ gitignored — deploy `bash push.sh`. Frontend: apps/spawn/public/dashboard.html (~15.5k lines, vanilla JS + WS). Drivers: packages/osmoda-gateway/src/drivers/{openclaw,claude-code}.ts. ws-relay: scripts/install.sh. Relay: apps/spawn/server.js.
+BOX: root@89.167.93.28 key .keys/agentos_hetzner → customer 178.105.95.236 via /opt/spawn-app/.keys/spawn_mgmt_ed25519. OpenClaw 2026.5.20 executive runtime.
+
+ROOT CAUSE (verified): OpenClaw `agent --json` returns ONE final blob — no stream flag — so the buffered driver = "no streaming". FIX: the run writes a live append-only trajectory at /root/.openclaw/agents/<id>/sessions/<session-id>.trajectory.jsonl (session.started, toolCall, toolResult, assistant text, model.completed, session.ended). Tail it; emit the contract live.
+
+KEEP WS transport (not SSE): adopt the skill's CONTRACT + components + discipline over WS frames. One turn-state model; mutate locals, flush once per event.
+
+EXECUTION: TaskCreate each phase; in_progress before; completed only after a REAL run; commit+push or push.sh; honest reporting (no "verified" without a live run; flag usage caps that block it).
+
+P1 BACKEND CONTRACT + OPENCLAW STREAMING. Extend AgentEvent (types.ts): status, phase, interim_text, text_bulk, interim_commit_final. openclaw.ts: tail trajectory jsonl during the run; map toolCall→tool_use, toolResult→tool_result, assistant text→text deltas, session.ended→done; final --json as text_bulk with interim_commit_final de-dup. Unit-test the mapper.
+P2 PLUMBING. claude-code.ts: normalize its stream to the same contract (interim vs final on tool-call boundary). ws-relay (install.sh) + server.js + gateway pipeEvent: forward + persist the new types to the canonical transcript.
+P3 FRONTEND CONSUME LOOP + STREAMING TEXT. One currentTurn {status,interimText,finalText,toolCalls[],phase}; one flush/event. Status ping-pill cleared on first text. Markdown answer (headings, ▸ bullets, tables, links). Near-bottom-only autoscroll.
+P4 MANUS TOOL TIMELINE. Collapsible Thinking panel (auto-expand streaming, auto-collapse on answer); tool rows (icon tile + numbered badge + verb→noun + result reveal + >5 overflow); TOOL_META registry for osModa's 91 tools + DEFAULT_TOOL_META fallback. Two text channels (thinking vs answer) — never collapse them.
+P5 COMPOSER + RESILIENCE. Auto-grow textarea, focus ring, Send↔Stop swap, Enter/Shift+Enter. Real abort (halts backend AND front-end render; new send aborts in-flight). 60s per-frame stall watchdog → abort + retry banner. Error rendering for EVERY code (agent_silent, agent_disconnected, gateway_wedged/unreachable, credential_exhausted/cooldown) with the right CTA. Completion ✓ chip. Welcome quick-prompts empty state.
+P6 REPLAY PARITY. loadDashChatHistory rebuilds the new timeline (tool steps + thinking + answer) from the gateway canonical transcript. No double-render, no stuck "Thinking", no dropped errors.
+
+SUCCESS: on a funded box a real turn STREAMS token-by-token with a live tool timeline; Stop halts immediately; every error shows; reopening replays the timeline cleanly; no glitches.
+
+CONSTRAINTS: never destructive without approval; never expose secrets; one event contract (no second format/renderer); preserve behaviour on refactor; keep load-bearing "why" comments; if the key is usage-capped, build+unit-test and SAY SO rather than claim live-verified.

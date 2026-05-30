@@ -1,0 +1,27 @@
+GOAL: complete osModa + spawn.os.moda production hardening.
+
+REPO: /Users/admin/Desktop/molt-os (public: bolivian-peru/os-moda; commit+push tracked). apps/spawn/ gitignored, deploy via `bash push.sh`.
+SPAWN SERVER (NixOS 26.05, Hetzner): root@89.167.93.28, key .keys/agentos_hetzner. Site https://spawn.os.moda. /etc/nixos/configuration.nix is writable; apply with `nixos-rebuild switch`. nginx IMPERATIVE on :80/:443 with HSTS.
+CUSTOMER BOX (verify ref): 178.105.95.236 — two-hop via spawn server using /opt/spawn-app/.keys/spawn_mgmt_ed25519. OpenClaw 2026.5.20 + osmoda-bridge plugin loaded (doctor clean, 91 tools); osmoda+mobile agents runtime=openclaw.
+
+ALREADY DONE — DO NOT REDO: TLS auto-renew+nginx-reload timer, 5-min self-heal watchdog, npm audit fix (9→0 vulns, box+local lock), removed vestigial agentd+openclaw-gateway units, secrets 0600, OpenClaw executive runtime fleet-wide.
+
+REMAINING — execute in order; TaskCreate each; in_progress before; completed only after live verify; commit+push or push.sh as appropriate; honest reporting (no "verified" without a real run); ask before using secrets you don't have.
+
+P0a OFF-BOX BACKUPS. Daily encrypted backup of /opt/spawn-app/data/* (orders.enc, users.enc, tokens.enc, events.enc, sessions.enc, chat-events/, dash-chat/, server-events/, spawn-log/) to off-box (Hetzner Storage Box or S3). age/gpg with key NOT on the box. NixOS timer (daily 04:13 + RandomizedDelay). Retain 30 daily + 12 monthly. Test: manual trigger, list off-box, dry-restore into /tmp. Ask user for endpoint+creds.
+
+P0b TELEGRAM ALERTING. Bot: t.me/osmodasystems. Add spawn-alerter service: on Result=failed for spawn-healthcheck/cert-renew/spawn-app or cert<10d, POST to Telegram Bot API. Wire spawn-healthcheck.script to alert on each remediation. Test: stop spawn-app 30s, confirm message. Ask user for bot token + chat_id.
+
+P0c CREDENTIAL FALLBACK (gateway). packages/osmoda-gateway/src/drivers/{claude-code,openclaw}.ts: on out_of_usage / 401 / 429, mark credential cooldown=30m and retry next healthy credential of same type. Surface "credential X exhausted" via /config/credentials + state.changed event. Add unit tests in packages/osmoda-gateway/test/. Build dist, scp drivers to /opt/osmoda/packages/osmoda-gateway/dist/drivers/ on box + systemctl restart osmoda-gateway, commit src+dist, push.
+
+P1 TESTS + CI. node:test smoke on apps/spawn /api/v1/* (mock fetch + real handlers): plans, spawn(402 envelope), status, chat WS frames, error envelope, Idempotency-Key dedupe. ≥20 tests green. .github/workflows/ci.yml on public repo: typecheck+build+test for gateway + integration-kit. Spawn-app smoke = public-safe stub if needed.
+
+P1 INSTALL.SH SMOKE. End of scripts/install.sh: assert gateway /health 200, `openclaw plugins doctor` clean, both drivers available, mcp-bridge up. Non-zero exit on any failure.
+
+P1 HARD-ENFORCE SECURITY. agentd ApprovalGate must runtime-block: rm -rf /, nixos-rebuild boot, DROP DATABASE/TABLE, bind to 0.0.0.0. Tests proving an unapproved destructive op is rejected.
+
+P2 POSTGRES PLAN (MD only). docs/PG-MIGRATION.md: schema for orders/users/tokens/requests/events; per-row PII encryption; dual-read cutover. Do NOT migrate yet.
+
+P2 DISASTER RECOVERY. docs/DR.md: rebuild box from scratch given backups+secrets; RTO/RPO target; one tested dry-run with logs.
+
+CONSTRAINTS: never destructive without explicit approval; never expose secrets in logs/repo; never re-add removed agentd/openclaw-gateway units; never claim verified without a live run; flag usage caps honestly when they block verification.

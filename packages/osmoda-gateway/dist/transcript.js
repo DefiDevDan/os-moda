@@ -68,6 +68,21 @@ export class TranscriptStore {
             /* best-effort persistence; chat must never break on a disk hiccup */
         }
     }
+    /**
+     * Highest seq currently on disk for this key (0 if none). For an append-only
+     * file seq == line count, so this is one cheap read with no JSON parse — used
+     * by the cross-chat digest to mark a brand-new chat "caught up to head"
+     * WITHOUT materializing the peer's whole backlog.
+     */
+    headSeq(agentId, sessionKey) {
+        try {
+            const file = this.fileFor(agentId, sessionKey);
+            return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length;
+        }
+        catch {
+            return 0;
+        }
+    }
     /** Read events with seq > sinceSeq. */
     read(agentId, sessionKey, sinceSeq = 0) {
         try {

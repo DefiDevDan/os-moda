@@ -84,8 +84,8 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
-RUNTIME="claude-code"  # DEFAULT agent driver. claude-code (multi-chat: token streaming + named chats + cross-chat awareness + OAuth/API key) or openclaw (BYOK 91-tool plugin ecosystem; API key only; per-round buffered). Both route through osmoda-gateway, so named chats work for either.
-RELAY_MODE="gateway"   # "gateway" (relay → osmoda-gateway; named chats + transcript) or "openclaw-native" (--advanced-openclaw-native: relay → OpenClaw's own gateway; NO named chats). Decoupled from RUNTIME on purpose.
+RUNTIME="claude-code"; RUNTIME_SET=false  # DEFAULT agent driver. claude-code (multi-chat: token streaming + named chats + cross-chat awareness + OAuth/API key) or openclaw (BYOK 91-tool plugin ecosystem; API key only; per-round buffered). Both route through osmoda-gateway, so named chats work for either. RUNTIME_SET tracks whether an explicit --runtime was given (so a no-flag re-run preserves the box's recorded choice).
+RELAY_MODE="gateway"; RELAY_SET=false   # "gateway" (relay → osmoda-gateway; named chats + transcript) or "openclaw-native" (--advanced-openclaw-native: relay → OpenClaw's own gateway; NO named chats). Decoupled from RUNTIME. RELAY_SET tracks an explicit flag so a re-run never silently flips an intentional native box back to gateway.
 SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
 DEFAULT_MODEL=""       # initial default model for the osmoda agent
 # Repeatable --credential flag. Each value: `label|provider|type|base64-secret`
@@ -109,8 +109,8 @@ while [[ $# -gt 0 ]]; do
     --callback-url)      CALLBACK_URL="$2"; shift 2 ;;
     --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
-    --runtime)           RUNTIME="$2"; shift 2 ;;
-    --advanced-openclaw-native) RELAY_MODE="openclaw-native"; RUNTIME="openclaw"; shift ;;
+    --runtime)           RUNTIME="$2"; RUNTIME_SET=true; shift 2 ;;
+    --advanced-openclaw-native) RELAY_MODE="openclaw-native"; RUNTIME="openclaw"; RELAY_SET=true; RUNTIME_SET=true; shift ;;
     --snapshot)          SNAPSHOT_MODE=true; shift ;;
     --default-model)     DEFAULT_MODEL="$2"; shift 2 ;;
     --credential)        CREDENTIALS+=("$2"); shift 2 ;;
@@ -344,6 +344,10 @@ if [ "$SKIP_NIXOS" = false ] && [ "$WANT_NIXOS" = true ]; then
     [ -n "$HEARTBEAT_SECRET" ] && PHASE2_ARGS="$PHASE2_ARGS --heartbeat-secret $HEARTBEAT_SECRET"
     [ -n "$PROVIDER_TYPE" ] && PHASE2_ARGS="$PHASE2_ARGS --provider $PROVIDER_TYPE"
     [ -n "$RUNTIME" ] && PHASE2_ARGS="$PHASE2_ARGS --runtime $(printf %q "$RUNTIME")"
+    # The native choice lives ONLY in RELAY_MODE (decoupled from RUNTIME), so it
+    # must be propagated explicitly to the Phase-2 re-exec or a native install
+    # silently lands on gateway mode after the NixOS reboot.
+    [ "$RELAY_MODE" = "openclaw-native" ] && PHASE2_ARGS="$PHASE2_ARGS --advanced-openclaw-native"
     [ -n "$DEFAULT_MODEL" ] && PHASE2_ARGS="$PHASE2_ARGS --default-model $(printf %q "$DEFAULT_MODEL")"
     # Pass through every --credential in order. printf %q quotes anything the
     # downstream Phase-2 shell might split on (spaces, etc). Label sanitizer
@@ -1041,6 +1045,15 @@ if [ -n "$ORDER_ID" ]; then
 fi
 
 # Store runtime choice (agent driver) + relay connect mode (decoupled).
+# Preserve a box's RECORDED topology on a no-flag re-run — never clobber an
+# intentional choice (esp. openclaw-native) with the in-memory defaults. Only an
+# explicit --runtime / --advanced-openclaw-native overrides what's on disk.
+if [ "$RUNTIME_SET" = false ] && [ -f "$STATE_DIR/config/runtime" ]; then
+  RUNTIME=$(tr -d '[:space:]' < "$STATE_DIR/config/runtime" 2>/dev/null); [ -n "$RUNTIME" ] || RUNTIME="claude-code"
+fi
+if [ "$RELAY_SET" = false ] && [ -f "$STATE_DIR/config/relay-mode" ]; then
+  RELAY_MODE=$(tr -d '[:space:]' < "$STATE_DIR/config/relay-mode" 2>/dev/null); [ -n "$RELAY_MODE" ] || RELAY_MODE="gateway"
+fi
 printf '%s\n' "$RUNTIME" > "$STATE_DIR/config/runtime"
 chmod 644 "$STATE_DIR/config/runtime"
 printf '%s\n' "$RELAY_MODE" > "$STATE_DIR/config/relay-mode"

@@ -50,6 +50,18 @@ test("a distinct explicit key does not collapse into Main", () => {
   assert.notEqual(other.slug, "main");
 });
 
+test("resolve() is non-mutating — never auto-creates (abuse-vector guard)", () => {
+  const { reg } = tmpReg();
+  reg.register("spawn-0bac4215"); // Main exists
+  const made = reg.resolveOrCreate("LIR Scrapers");
+  // resolve finds existing by slug or key, returns undefined for unknown
+  assert.equal(reg.resolve("lir scrapers").key, made.key);
+  assert.equal(reg.resolve(made.key).key, made.key);
+  assert.equal(reg.resolve("main").slug, "main");
+  assert.equal(reg.resolve("never-created-xyz"), undefined, "unknown id → undefined, NOT a new chat");
+  assert.equal(reg.list().length, 2, "resolve() created nothing");
+});
+
 test("rename + archive + list(includeArchived)", () => {
   const { reg } = tmpReg();
   const c = reg.resolveOrCreate("Temp");

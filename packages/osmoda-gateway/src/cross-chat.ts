@@ -34,9 +34,10 @@ const READ_ONLY_TOOLS = new Set([
   "codegraph_node", "codegraph_explore", "codegraph_files", "codegraph_status",
 ]);
 
-const MAX_PER_PEER = 6;   // notable actions shown per peer chat
-const MAX_PEERS = 8;      // peer chats shown
-const MAX_CHARS = 1600;   // ~400 tokens hard cap on the whole digest
+const MAX_PER_PEER = 6;        // notable actions shown per peer chat
+const MAX_PEERS = 8;          // peer chats shown
+const MAX_PEERS_SCANNED = 16; // peer transcripts read per turn (bounds O(N) cost)
+const MAX_CHARS = 1600;       // ~400 tokens hard cap on the whole digest
 
 function verbFor(name: string): string {
   const n = name.toLowerCase();
@@ -66,11 +67,22 @@ export function buildCrossChatDigest(
 ): CrossChatDigest {
   const advance: Array<{ peerKey: string; seq: number }> = [];
   const blocks: string[] = [];
-  const peers = chats.list(false).filter((c) => c.key !== currentChatKey);
+  // list() is sorted by last_active desc; scan only the most-recently-active
+  // peers so the per-turn cost is bounded regardless of total chat count.
+  const peers = chats.list(false).filter((c) => c.key !== currentChatKey).slice(0, MAX_PEERS_SCANNED);
 
   for (const peer of peers) {
     const cursor = chats.getCursor(currentChatKey, peer.key); // -1 if unseen
-    const evs = transcripts.read(agentId, peer.key, Math.max(0, cursor));
+    if (cursor < 0) {
+      // Unseen peer → START CAUGHT-UP to its head: emit NO digest now (never
+      // replay a peer's whole backlog the first time this chat runs), and ALWAYS
+      // commit the head cursor — even head=0 — so the next turn enters the delta
+      // branch and surfaces work done AFTER this point (committing only on head>0
+      // would leave the cursor at -1 and silently swallow the peer's next rows).
+      advance.push({ peerKey: peer.key, seq: transcripts.headSeq(agentId, peer.key) });
+      continue;
+    }
+    const evs = transcripts.read(agentId, peer.key, cursor);
     if (!evs.length) continue;
     // Advance to this peer's head regardless of notability, so we never re-scan
     // already-seen rows (incl. pure reads) next turn.

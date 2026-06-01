@@ -264,7 +264,12 @@ const server = http.createServer(async (req, res) => {
                 json(400, { error: "name_required" });
                 return;
             }
-            json(200, { chat: chats.resolveOrCreate(b.name) });
+            try {
+                json(200, { chat: chats.resolveOrCreate(b.name) });
+            }
+            catch (e) {
+                json(429, { error: "chat_limit", message: e?.message || "chat limit reached" });
+            }
             return;
         }
         const cm = url.pathname.match(/^\/chats\/(.+)$/);
@@ -319,6 +324,11 @@ wss.on("connection", (ws, req) => {
         }
     }
     let abortController = null;
+    // Serialized turns: one chat turn at a time per connection (the agreed model).
+    // The relay multiplexes all named chats over this one ws, and abortController
+    // is per-connection — without this gate a 2nd message would clobber the first
+    // turn's controller, orphaning it (unabortable, credential-leaking).
+    let busy = false;
     ws.on("message", async (data) => {
         let msg;
         try {
@@ -335,6 +345,13 @@ wss.on("connection", (ws, req) => {
         }
         if (msg.type !== "chat" || !msg.text)
             return;
+        if (busy) {
+            ws.send(JSON.stringify({
+                type: "error", code: "turn_in_progress",
+                text: "A turn is already running on this server — one at a time. Wait for it to finish, or press Stop.",
+            }));
+            return;
+        }
         const agent = msg.agentId ? cache.findAgent(msg.agentId) : cache.agentForChannel("web");
         if (!agent) {
             ws.send(JSON.stringify({ type: "error", text: "No agent configured" }));
@@ -359,16 +376,18 @@ wss.on("connection", (ws, req) => {
         // (sessionKey only, or neither) keeps its key UNCHANGED — no routing change
         // for existing conversations — and is lazily registered so it appears in
         // the chat list. "main"/legacy keys map to the Main chat for continuity.
+        // Resolve the chat WITHOUT auto-creating (abuse vector — a client must not
+        // be able to mint unbounded chats by sending arbitrary chatIds). An explicit
+        // chatId that matches a chat created via POST /chats routes to it; anything
+        // else (incl. "main" or an unknown id) falls back to the server's ORIGINAL
+        // conversation key, registered as "Main" for continuity + the chat list.
+        // New chats are minted ONLY via POST /chats.
         let sessionKey;
-        const mainAlias = msg.chatId && /^(main|general|default|chat-main)$/i.test(msg.chatId.trim());
-        if (msg.chatId && !mainAlias) {
-            // A real named chat → its own key + session + transcript.
-            sessionKey = chats.resolveOrCreate(msg.chatId).key;
+        const existingChat = msg.chatId ? chats.resolve(msg.chatId) : undefined;
+        if (existingChat) {
+            sessionKey = existingChat.key;
         }
         else {
-            // "main"/legacy/none → the ORIGINAL conversation, keyed by the relay's
-            // sessionKey so existing --resume history + transcript carry over
-            // (zero-move migration); registered as "Main" for the chat list.
             sessionKey = msg.sessionKey || "ws-default";
             chats.register(sessionKey);
         }
@@ -411,6 +430,7 @@ wss.on("connection", (ws, req) => {
         catch (e) {
             console.warn(`[cross-chat] digest skipped: ${e?.message || e}`);
         }
+        busy = true; // serialized-turn gate (cleared in finally); set before the first await
         abortController = new AbortController();
         const systemPrompt = loadSystemPrompt(agent);
         let turnText = "";
@@ -529,10 +549,14 @@ wss.on("connection", (ws, req) => {
                 }
             }
             flushAssistant();
-            // Cross-chat cursors advance ONLY now that the turn succeeded — a failed
-            // turn re-shows the same digest next time rather than silently skipping it.
-            for (const a of digestAdvance)
-                chats.setCursor(sessionKey, a.peerKey, a.seq);
+            // Cross-chat cursors advance ONLY when the turn actually DELIVERED output
+            // (pass.hadOutput) — NOT on a credential-exhausted no-fallback soft failure,
+            // which sends an error frame without throwing. Otherwise we'd mark peer
+            // changes "seen" that the agent never actually processed, dropping them.
+            if (pass.hadOutput) {
+                for (const a of digestAdvance)
+                    chats.setCursor(sessionKey, a.peerKey, a.seq);
+            }
         }
         catch (e) {
             flushAssistant();
@@ -540,7 +564,10 @@ wss.on("connection", (ws, req) => {
                 ws.send(JSON.stringify({ type: "error", text: e?.message || String(e) }));
             }
         }
-        abortController = null;
+        finally {
+            abortController = null;
+            busy = false; // release the serialized-turn gate no matter how the turn ended
+        }
     });
     ws.on("close", () => { if (abortController)
         abortController.abort(); });

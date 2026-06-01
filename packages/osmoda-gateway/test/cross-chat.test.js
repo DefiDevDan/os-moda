@@ -21,36 +21,36 @@ function fixture(label) {
   return { transcripts, chats };
 }
 
-test("digest surfaces OTHER chats' notable changes, skips reads, advances cursor", () => {
+test("new chat starts CAUGHT-UP (no backlog flood), then sees only changes made AFTER", () => {
   const { transcripts, chats } = fixture("a");
   const A = chats.resolveOrCreate("Infra"); // consumer
   const B = chats.resolveOrCreate("LIR Scrapers"); // peer
-  // Peer B does work (mutations + a read).
+  // Peer B did work BEFORE the consumer ever ran (this is the backlog).
   transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Read", target: "/srv/x.js" });
-  transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Write", target: "/srv/scraper.js" });
+  transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Write", target: "/srv/old.js" });
   transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "shell_exec", target: "systemctl restart lirr" });
-  transcripts.append(AGENT, B.key, { role: "assistant", text: "done" });
 
-  const dg = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
-  assert.ok(dg.text, "digest produced");
-  assert.match(dg.text, /LIR Scrapers/);
-  assert.match(dg.text, /wrote \/srv\/scraper\.js/);
-  assert.match(dg.text, /ran systemctl restart lirr/);
-  assert.doesNotMatch(dg.text, /Read|x\.js/, "pure-read tool excluded");
-  assert.equal(dg.peers, 1);
-  // Commit the cursor (as index.ts does after a successful turn).
-  for (const a of dg.advance) chats.setCursor(A.key, a.peerKey, a.seq);
+  // A's first turn: must NOT replay B's backlog — start caught-up to B's head.
+  const dg1 = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
+  assert.equal(dg1.text, null, "brand-new chat is caught-up: NO backlog digest");
+  assert.ok(dg1.advance.find((a) => a.peerKey === B.key), "but the cursor advances to B's head");
+  for (const a of dg1.advance) chats.setCursor(A.key, a.peerKey, a.seq); // commit (as index.ts does on success)
 
-  // Nothing new since → empty digest (no token cost in steady state).
-  const dg2 = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
-  assert.equal(dg2.text, null, "no new peer activity → null");
-
-  // Peer B does ONE more thing → only that shows.
+  // Now B does NEW work AFTER A caught up.
   transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Edit", target: "/srv/scraper.js" });
-  const dg3 = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
-  assert.ok(dg3.text);
-  assert.match(dg3.text, /edited \/srv\/scraper\.js/);
-  assert.doesNotMatch(dg3.text, /restart lirr/, "already-seen rows not repeated");
+  transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Read", target: "/srv/scraper.js" });
+
+  const dg2 = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
+  assert.ok(dg2.text, "new post-catch-up change surfaces");
+  assert.match(dg2.text, /LIR Scrapers/);
+  assert.match(dg2.text, /edited \/srv\/scraper\.js/, "the NEW change shows");
+  assert.doesNotMatch(dg2.text, /old\.js|restart lirr/, "backlog never replayed");
+  assert.doesNotMatch(dg2.text, /Read/, "pure-read tool excluded");
+  assert.equal(dg2.peers, 1);
+  for (const a of dg2.advance) chats.setCursor(A.key, a.peerKey, a.seq);
+
+  // Nothing new since → empty (zero token cost in steady state).
+  assert.equal(buildCrossChatDigest(transcripts, chats, AGENT, A.key).text, null);
 });
 
 test("a chat never sees its OWN activity, and a lone chat has no digest", () => {
@@ -61,14 +61,16 @@ test("a chat never sees its OWN activity, and a lone chat has no digest", () => 
   assert.equal(dg.text, null, "no peers → null (zero overhead for single-chat work)");
 });
 
-test("digest is bounded — many peer actions are capped + elided", () => {
+test("digest is bounded — a SEEN peer's many new actions are capped + elided", () => {
   const { transcripts, chats } = fixture("c");
   const A = chats.resolveOrCreate("Consumer");
   const B = chats.resolveOrCreate("Busy");
+  // Catch A up to B's (empty) head first, so subsequent rows are "new".
+  for (const a of buildCrossChatDigest(transcripts, chats, AGENT, A.key).advance) chats.setCursor(A.key, a.peerKey, a.seq);
   for (let i = 0; i < 50; i++) {
     transcripts.append(AGENT, B.key, { role: "tool", kind: "use", name: "Write", target: "/f" + i });
   }
   const dg = buildCrossChatDigest(transcripts, chats, AGENT, A.key);
-  assert.ok(dg.text.length < 1800, "digest hard-capped (~400 tokens)");
+  assert.ok(dg.text && dg.text.length < 1800, "digest hard-capped (~400 tokens)");
   assert.match(dg.text, /earlier\)/, "elision marker present");
 });

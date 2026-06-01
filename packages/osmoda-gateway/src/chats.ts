@@ -31,6 +31,10 @@ const DEFAULT_PATH =
 
 const SAVE_DEBOUNCE_MS = 250;
 const MAX_NAME = 60;
+// Cap the number of live (non-archived) chats per server. The hot WS path never
+// auto-creates (only POST /chats does), but this bounds even deliberate growth
+// so chats.json + per-chat transcripts + --resume sessions can't grow unbounded.
+const MAX_CHATS = 500;
 
 export interface Chat {
   key: string;                       // the sessionKey/userId — the chat's identity
@@ -164,6 +168,18 @@ export class ChatRegistry {
    * existing Main chat (preserving the legacy key's history) rather than
    * minting a fresh chat-main.
    */
+  /**
+   * NON-MUTATING resolve: find an existing chat by exact key or slug; returns
+   * undefined if none. The hot WS chat path uses THIS (never auto-creates), so a
+   * client can't mint unbounded chats by sending arbitrary chatIds — only the
+   * explicit POST /chats (resolveOrCreate) creates.
+   */
+  resolve(idOrName: string): Chat | undefined {
+    const raw = String(idOrName || "").trim();
+    if (!raw) return undefined;
+    return this.chats.get(raw) || this.bySlug(slugify(raw));
+  }
+
   resolveOrCreate(idOrName: string): Chat {
     const raw = String(idOrName || "").trim();
     if (!raw) return this.register("ws-default");
@@ -174,7 +190,9 @@ export class ChatRegistry {
     const slug = slugify(raw);
     const bySlugMatch = this.bySlug(slug);
     if (bySlugMatch) { this.touch(bySlugMatch.key); return bySlugMatch; }
-    // 3) create a new named chat
+    // 3) create a new named chat — bounded by MAX_CHATS.
+    const active = Array.from(this.chats.values()).filter((c) => !c.archived).length;
+    if (active >= MAX_CHATS) throw new Error(`chat limit reached (${MAX_CHATS}); archive some chats first`);
     let key = chatKeyForSlug(slug);
     let n = 2;
     while (this.chats.get(key)) { key = chatKeyForSlug(slug + "-" + n++); }

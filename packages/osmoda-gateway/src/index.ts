@@ -362,7 +362,12 @@ wss.on("connection", (ws, req) => {
           // credential-error fallback isn't triggered after real progress.)
           hadOutput = true;
         } else if (event.type === "tool_use") {
-          flushAssistant();
+          // Do NOT flush the assistant accumulator here. A single logical turn
+          // interleaves text + tools; flushing per tool_use persisted N+1 stub
+          // assistant rows per turn (the fragmented "Task completed" bug). Tool
+          // rows are appended in order; the ONE assistant answer is flushed at
+          // `done`. (With the two-channel driver, turnText only holds the final
+          // text_bulk anyway — but dropping the flush also covers answer→tool.)
           transcripts.append(agent.id, sessionKey, {
             role: "tool", kind: "use", name: event.name, target: event.target,
           });

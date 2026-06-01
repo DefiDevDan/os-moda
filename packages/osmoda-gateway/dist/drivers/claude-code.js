@@ -294,6 +294,16 @@ export const claudeCodeDriver = {
         let lastTextMsgId = null;
         let emittedAnyText = false;
         let hasOutput = false;
+        // Two-channel contract (parity with the openclaw driver). claude-code emits
+        // a text block before EACH tool call and one for the final answer, and we
+        // can't know mid-stream which is the final one. So we stream EVERY assistant
+        // text block on the INTERIM (thinking) channel live, track how much we've
+        // emitted, and at the terminal `result` event promote the authoritative
+        // final answer as `text_bulk` (+ interim_commit_final + phase:answering).
+        // This is what stops the "wall of preambles" live and the "N Task-completed
+        // stubs" on replay — interim text never enters the canonical answer.
+        let emittedInterim = 0;
+        let lastMsgFullText = "";
         let stderrText = "";
         proc.stderr?.on("data", (d) => { stderrText += d.toString(); });
         try {
@@ -329,14 +339,18 @@ export const claudeCodeDriver = {
                                 const full = block.text;
                                 const prev = textLenByMsg.get(msgId) || 0;
                                 if (full.length > prev) {
-                                    // New assistant message after we've already streamed some
-                                    // text → separate it from the prior message's paragraph.
+                                    // Stream on the INTERIM channel (live thinking panel), NOT the
+                                    // final-answer channel — see the two-channel note above. The
+                                    // authoritative answer is promoted at `result`.
+                                    let delta = full.slice(prev);
                                     if (prev === 0 && emittedAnyText && msgId !== lastTextMsgId) {
-                                        yield { type: "text", text: "\n\n" };
+                                        delta = "\n\n" + delta; // separate distinct assistant messages
                                     }
-                                    yield { type: "text", text: full.slice(prev) };
+                                    yield { type: "interim_text", text: delta };
+                                    emittedInterim += delta.length;
                                     textLenByMsg.set(msgId, full.length);
                                     lastTextMsgId = msgId;
+                                    lastMsgFullText = full; // most-recent message text = final-answer candidate
                                     emittedAnyText = true;
                                     hasOutput = true;
                                 }
@@ -372,8 +386,22 @@ export const claudeCodeDriver = {
                             text: msg,
                         };
                     }
-                    else if (event.result && typeof event.result === "string" && !hasOutput) {
-                        yield { type: "text", text: event.result };
+                    else {
+                        // Promote the authoritative final answer (mirrors openclaw.ts
+                        // end-of-turn). Prefer the CLI's assembled `result` string; fall
+                        // back to the last assistant message's text. Trim the interim
+                        // channel (it streamed live) and replace it with ONE clean answer,
+                        // then flip to the answering phase so the UI collapses "thinking".
+                        const finalText = (typeof event.result === "string" && event.result.trim())
+                            ? event.result
+                            : lastMsgFullText;
+                        if (finalText && finalText.trim()) {
+                            if (emittedInterim > 0)
+                                yield { type: "interim_commit_final", length: emittedInterim };
+                            yield { type: "text_bulk", text: finalText };
+                            yield { type: "phase", phase: "answering" };
+                            hasOutput = true;
+                        }
                     }
                     sessionId = event.session_id || sessionId;
                 }

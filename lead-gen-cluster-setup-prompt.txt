@@ -1,0 +1,135 @@
+════════════════════════════════════════════════════════════════════════════
+  osModa SERVER SETUP PROMPT — LOCAL LEAD-GEN WEBSITE ENGINE
+  Paste this whole message into the chat on your fresh osModa box.
+════════════════════════════════════════════════════════════════════════════
+
+You are my resident engineer on this server. We are building a LOCAL LEAD-GEN
+WEBSITE ENGINE: localized service sites (e.g. "Emergency Plumber in Berlin")
+that rank in Google, capture leads via a form/phone, and that I then rent or
+sell to local tradespeople ("rank-and-rent" + per-lead arbitrage).
+
+Read this entire brief, then propose a short plan and WAIT for my go-ahead
+before building. Work in phases. Show me what you do. Never run destructive
+or production-affecting commands without asking.
+
+────────────────────────────────────────────────────────────────────────────
+THE STRATEGY (this is the most important part — do not skip it)
+────────────────────────────────────────────────────────────────────────────
+We are NOT mass-producing thousands of thin, near-identical "doorway" pages.
+Google's spam / helpful-content systems deindex those in bulk, and in Germany
+they invite legal warnings (Abmahnung). That approach loses money. Instead:
+
+  • DEPTH OVER BREADTH. We build a REPEATABLE ENGINE and prove ONE
+    city × ONE niche end-to-end before scaling anything.
+  • Every page must be genuinely useful, fast, unique enough to survive
+    (real local info, pricing guidance, FAQs, distinct contact details),
+    and fully legally compliant.
+  • We scale only AFTER one site ranks and produces a real lead. Quality of
+    the engine first; quantity later, carefully.
+
+If at any point I ask you to "just spin up 1000 pages," remind me of this
+guardrail and propose the compliant version instead.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 0 — ENVIRONMENT CHECK (do this first, report back)
+────────────────────────────────────────────────────────────────────────────
+1. Confirm the stack you have: web server (Caddy expected), available runtimes
+   (Node/Python), database options (PostgreSQL/SQLite), disk, RAM.
+2. Confirm Caddy can do ON-DEMAND TLS (auto-HTTPS for any domain pointed here),
+   so adding a new domain = DNS record + DB row, no per-site config.
+3. Report what's already installed and what you'd add. Don't install yet.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 1 — BUILD THE ENGINE (one app, data-driven, multi-site)
+────────────────────────────────────────────────────────────────────────────
+Architecture: ONE application + ONE database serves ALL sites. A "site" is a
+row, not a separate codebase. Build:
+
+  • A small, fast web app (server-rendered, SEO-friendly — NOT a heavy SPA).
+    Static-leaning, sub-1s load, mobile-first, clean professional design.
+  • A database schema roughly:
+        niches(id, slug, display_name, lead_value_est)
+        cities(id, slug, display_name, country, region, population)
+        sites(id, domain, niche_id, city_id, brand_name, phone, status,
+              owner/renter, theme, created_at)
+        pages(id, site_id, type, slug, title, meta_description, body_md)
+        leads(id, site_id, name, contact, message, source, consent_ts,
+              created_at, status, sold_to, sale_price)
+  • Multi-tenant routing: incoming Host header → look up site → render.
+  • A content system: per-site pages are generated from templates + REAL
+    localized data, with enough unique content per page to not be templated
+    spam. You (the agent) generate the localized copy, FAQs, and local detail.
+  • An admin view (protected) where I can: add a city/niche/site, see leads,
+    mark a lead sold, set the renter and rent amount.
+
+Pick sensible, boring, reliable tech. Explain your choice in 2 lines.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 2 — FIRST PROOF SITE (one only)
+────────────────────────────────────────────────────────────────────────────
+Build ONE complete site end-to-end as the template. Ask me to choose, but
+default suggestion: niche = "Emergency Plumber", city = a Tier-1 city I name
+(Berlin / London / Vienna / Zürich are high lead value).
+
+The proof site must include:
+  • Homepage + a few deep pages (services, pricing guide, service areas, FAQ,
+    "how it works", contact). Real, useful, locally-specific content.
+  • A prominent click-to-call phone CTA + a lead capture form.
+  • Fast, professional, trustworthy design (this sells the lead's quality).
+  • Schema.org LocalBusiness / Service structured data for SEO.
+  • Clean URLs, sitemap.xml, robots.txt, Open Graph tags, fast Core Web Vitals.
+
+Do NOT impersonate a real existing business or use a real company's name,
+trademark, address, or reviews. The brand is generic/ours until rented.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 3 — LEGAL COMPLIANCE (mandatory — non-negotiable, especially .de)
+────────────────────────────────────────────────────────────────────────────
+EVERY site must ship with, before going live:
+  • Impressum (legal notice) — required for German sites; template it but flag
+    that I must fill in the real responsible-party details (Telemediengesetz).
+  • Datenschutzerklärung (GDPR/DSGVO privacy policy) covering the lead form,
+    analytics, cookies.
+  • A consent checkbox on the lead form, and store consent timestamp.
+  • Cookie/consent banner if any non-essential cookies/analytics are used.
+  • No collecting more personal data than needed; secure storage of leads.
+Tell me clearly which fields I personally must provide (real legal entity,
+address, contact) — do not invent legal/identity details.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 4 — MEASUREMENT + LEADS
+────────────────────────────────────────────────────────────────────────────
+  • Privacy-friendly analytics (self-hosted / cookieless preferred) so I can
+    see traffic and conversions per site.
+  • Lead pipeline: capture → notify me (and later the renter) → track status
+    (new / contacted / sold) → record sale price. Per-site call tracking-ready.
+  • A simple dashboard: per site — visits, leads, conversion rate, revenue.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE 5 — SCALING (ONLY after Phase 2 ranks + produces a real lead)
+────────────────────────────────────────────────────────────────────────────
+When I say a site has proven out, give me a one-command way to clone the
+template to a new city/niche, with these rules baked in:
+  • Each new site gets genuinely localized, distinct content (not find-replace).
+  • Distinct phone number per site (call attribution + looks legitimate).
+  • Compliance pages auto-included.
+  • Stagger launches; track which survive/rank so we double down on winners.
+Maintain a target list of Tier-1 European cities and high-urgency niches
+(emergency plumber, electrician, locksmith, water-damage/restoration, HVAC,
+garage doors, towing). Deprioritize low-urgency low-margin niches (e.g. tool
+rental) until the model is proven.
+
+────────────────────────────────────────────────────────────────────────────
+HOW TO WORK WITH ME
+────────────────────────────────────────────────────────────────────────────
+  • Start by doing PHASE 0 and reporting back with your proposed plan + tech
+    choices + what you need from me (domain, target city/niche, legal details).
+  • Then proceed phase by phase, confirming before anything that costs money,
+    touches DNS/production, or publishes a live site.
+  • Be honest: if something won't rank, won't comply, or won't make money,
+    tell me plainly. I want durable revenue, not vanity page counts.
+  • Persist what we build and our decisions to your workspace memory so we keep
+    momentum across sessions.
+
+Begin with Phase 0 now.
+════════════════════════════════════════════════════════════════════════════

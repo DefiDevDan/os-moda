@@ -2070,12 +2070,17 @@ function connect() {
       console.log("[ws-relay] chat:", msg.text.slice(0, 50));
       return;
     }
-    if (msg.type === "chat_abort") {
+    // Accept BOTH "chat_abort" (relay's own contract) and "abort" (what the
+    // spawn-app's /chat-abort handler actually sends). The frame-type mismatch
+    // silently dropped every Stop click here, so the agent kept spinning.
+    if (msg.type === "chat_abort" || msg.type === "abort") {
       if (RUNTIME === "claude-code") {
         local.send(JSON.stringify({ type: "abort" }));
       } else {
         local.send(JSON.stringify({ type: "req", id: uid(), method: "chat.abort", params: { sessionKey } }));
       }
+      console.log("[ws-relay] abort -> gateway");
+      return;
     }
   });
 

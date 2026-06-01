@@ -2,7 +2,15 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-05-06
+Last updated: 2026-06-01
+
+## Recent operational changes (2026-06-01 · gateway v0.2.5 — chat fidelity + Stop)
+
+| Area | Change | Why |
+|---|---|---|
+| **Chat fragmentation (root-caused via multi-agent audit)** | The claude-code driver was the only runtime not honoring the two-text-channel contract — it emitted every interleaved-turn text block (planning preambles AND the final answer) on the final-answer `text` channel. Combined with the gateway flushing an assistant transcript row on **every** `tool_use`, one logical turn persisted as N+1 stub rows, and the dashboard replay closed a turn (stamping "Task completed") per row. Result: a stack of preamble + "Task completed" stubs with no coherent answer on reopen. **Fix:** claude-code now streams preambles as `interim_text` and promotes only the authoritative final answer as `text_bulk` (+ `interim_commit_final` + `phase:answering`), mirroring openclaw; the gateway no longer flushes per `tool_use` (one assistant entry per turn); the dashboard replay accumulates agent rows into one turn (heals pre-fix transcripts). Live-verified: `text:0, interim_text, tool_use×2, text_bulk×1`, transcript `assistant entries: 1`. +2 driver integration tests (16 gateway tests green). | The user's "no responses / stacked Task-completed / must save all proper" report. Confirmed end-to-end by a 16-agent audit + 8/8 adversarial verification. |
+| **Stop button** | ws-relay now accepts both `chat_abort` and `abort` (the spawn-app sends `abort`; the relay only matched `chat_abort`, silently dropping every Stop). Dashboard Stop is now client-first + unconditional (halts the UI instantly even when nothing is in flight). Abort SIGTERM→SIGKILLs the claude process-group. | "Stop doesn't work / agent keeps spinning / wasting tokens" — the abort never reached the gateway, and a finished-but-stuck spinner looked like a live run. |
+| **Runtime guidance** | claude-code is now the recommended chat runtime (token streaming + live tools + native session history/compaction). openclaw buffers per model-round (18–34 s dump, cumulative-history re-send) and cannot token-stream. Runtime is per-agent, swappable from the Engine tab. | The "no streaming, glitchy, 19 s of Thinking then a wall" reports trace to openclaw's CLI being non-streaming. |
 
 ## Recent operational changes (2026-05-06 · v1.2.7)
 

@@ -28,6 +28,8 @@ import * as https from "node:https";
 import { WebSocketServer, WebSocket } from "ws";
 import { SessionStore } from "./sessions.js";
 import { TranscriptStore } from "./transcript.js";
+import { ChatRegistry } from "./chats.js";
+import { buildCrossChatDigest } from "./cross-chat.js";
 import { loadDurableMemory } from "./memory.js";
 import { ConfigCache } from "./config.js";
 import { runMigrationIfNeeded } from "./migrate.js";
@@ -162,6 +164,7 @@ const env = loadGatewayEnv();
 const cache = new ConfigCache();
 const sessions = new SessionStore();
 const transcripts = new TranscriptStore();
+const chats = new ChatRegistry();
 
 // Prune expired sessions every 5 minutes.
 setInterval(() => sessions.prune(), 5 * 60 * 1000);
@@ -242,6 +245,58 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Named-chat registry API (gateway owns chat identity; the dashboard lists +
+  // creates + renames + archives chats here). Bearer-authed like /sessions.
+  if (url.pathname === "/chats" || url.pathname.startsWith("/chats/")) {
+    if (env.authToken) {
+      const auth = req.headers.authorization;
+      if (auth !== `Bearer ${env.authToken}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+    }
+    const json = (code: number, obj: any) => {
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(obj));
+    };
+    const readBody = async (): Promise<any> => {
+      let body = "";
+      for await (const chunk of req) { body += chunk; if (body.length > 64 * 1024) throw new Error("too large"); }
+      return body ? JSON.parse(body) : {};
+    };
+    if (req.method === "GET" && url.pathname === "/chats") {
+      json(200, { chats: chats.list(url.searchParams.get("archived") === "1") });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/chats") {
+      let b: any; try { b = await readBody(); } catch { json(400, { error: "bad_body" }); return; }
+      if (!b.name || typeof b.name !== "string") { json(400, { error: "name_required" }); return; }
+      json(200, { chat: chats.resolveOrCreate(b.name) });
+      return;
+    }
+    const cm = url.pathname.match(/^\/chats\/(.+)$/);
+    if (cm) {
+      const key = decodeURIComponent(cm[1]);
+      if (req.method === "PATCH") {
+        let b: any; try { b = await readBody(); } catch { json(400, { error: "bad_body" }); return; }
+        let c = chats.get(key);
+        if (!c) { json(404, { error: "not_found" }); return; }
+        if (typeof b.name === "string") c = chats.rename(key, b.name) || c;
+        if (typeof b.archived === "boolean") c = chats.setArchived(key, b.archived) || c;
+        json(200, { chat: c });
+        return;
+      }
+      if (req.method === "DELETE") {
+        const c = chats.setArchived(key, true); // soft delete (archive) — never lose transcript
+        json(c ? 200 : 404, c ? { ok: true, chat: c } : { error: "not_found" });
+        return;
+      }
+    }
+    json(404, { error: "not_found" });
+    return;
+  }
+
   // Telegram webhook
   if (req.method === "POST" && url.pathname === "/telegram") {
     await handleTelegram(req, res);
@@ -267,7 +322,7 @@ wss.on("connection", (ws, req) => {
   let abortController: AbortController | null = null;
 
   ws.on("message", async (data) => {
-    let msg: { type?: string; text?: string; sessionKey?: string; agentId?: string };
+    let msg: { type?: string; text?: string; sessionKey?: string; chatId?: string; agentId?: string };
     try { msg = JSON.parse(data.toString()); } catch {
       ws.send(JSON.stringify({ type: "error", text: "Invalid JSON" }));
       return;
@@ -292,7 +347,19 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
-    const sessionKey = msg.sessionKey || "ws-default";
+    // Named chats: an explicit chatId routes to that chat's OWN session +
+    // transcript (full isolation, native --resume history). A legacy frame
+    // (sessionKey only, or neither) keeps its key UNCHANGED — no routing change
+    // for existing conversations — and is lazily registered so it appears in
+    // the chat list. "main"/legacy keys map to the Main chat for continuity.
+    let sessionKey: string;
+    if (msg.chatId) {
+      sessionKey = chats.resolveOrCreate(msg.chatId).key;
+    } else {
+      sessionKey = msg.sessionKey || "ws-default";
+      chats.register(sessionKey);
+    }
+    chats.touch(sessionKey);
     const session = sessions.getOrCreate(sessionKey, "web", agent.id, agent.runtime);
 
     // Canonical transcript: record the user's message (gateway owns session
@@ -314,6 +381,24 @@ wss.on("connection", (ws, req) => {
           `${recap}\n\n[End of recap. The user's new message follows.]\n\n${msg.text}`;
         console.log(`[transcript] re-seeded ${agent.id}:${sessionKey} from durable transcript (${recap.length} chars)`);
       }
+    }
+
+    // Cross-chat awareness: prepend a bounded digest of significant changes
+    // OTHER named chats made since this chat last ran. Best-effort — must never
+    // block the turn. Cursors advance only AFTER the turn succeeds (below).
+    let digestAdvance: Array<{ peerKey: string; seq: number }> = [];
+    try {
+      const dg = buildCrossChatDigest(transcripts, chats, agent.id, sessionKey);
+      digestAdvance = dg.advance;
+      if (dg.text) {
+        messageToSend = `${dg.text}\n\n${messageToSend}`;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "cross_chat_digest", text: dg.text, peers: dg.peers }));
+        }
+        console.log(`[cross-chat] injected digest for ${sessionKey} (${dg.peers} peer chat(s))`);
+      }
+    } catch (e: any) {
+      console.warn(`[cross-chat] digest skipped: ${e?.message || e}`);
     }
 
     abortController = new AbortController();
@@ -427,6 +512,9 @@ wss.on("connection", (ws, req) => {
         }
       }
       flushAssistant();
+      // Cross-chat cursors advance ONLY now that the turn succeeded — a failed
+      // turn re-shows the same digest next time rather than silently skipping it.
+      for (const a of digestAdvance) chats.setCursor(sessionKey, a.peerKey, a.seq);
     } catch (e: any) {
       flushAssistant();
       if (ws.readyState === WebSocket.OPEN) {

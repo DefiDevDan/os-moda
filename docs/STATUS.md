@@ -13,7 +13,21 @@ Last updated: 2026-06-01
 | **Runtime differentiation** | `claude-code` is the default chat driver (token streaming + named chats + OAuth/API key). The ws-relay runs in **gateway mode** for both drivers (so named chats work for openclaw-via-gateway), decoupled from the agent driver; openclaw-native bypass is behind `install.sh --advanced-openclaw-native`. New spawns default to claude-code. | Shipped to `main` (install.sh); new spawns inherit. |
 | **OAuth plan** | claude-code runs on a Claude Pro/Max OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`); Engine tab gates credential type by `supported_auth_types`. | Built; OAuth-token live turn pending a user-supplied `sk-ant-oat01-…`. |
 
-Tests: 26 gateway tests green (chats 7, cross-chat 3, claude-code 2, openclaw 11, credentials 3), `node --test` exits clean. CI green.
+Tests: 27 gateway tests green (chats 8, cross-chat 3, claude-code 2, openclaw 11, credentials 3), `node --test` exits clean. CI green.
+
+**Production-readiness audit (2026-06-01, 14-agent adversarial + verification).** Confirmed + fixed:
+- **P0 upgrade safety** — a no-flag `install.sh` re-run no longer clobbers `config/runtime`/`config/relay-mode` (RUNTIME_SET/RELAY_SET sentinels + seed-from-disk); `--advanced-openclaw-native` now propagates through the NixOS Phase-2 re-exec.
+- **P0 unbounded chat creation** — the WS path is now resolve-only (`chats.resolve()`, never auto-creates); chats are minted ONLY via `POST /chats`, capped at `MAX_CHATS=500`. Verified live: arbitrary inbound chatIds route to Main and do NOT create chats.
+- **P1 caught-up** — a new chat no longer replays a peer's backlog (the `-1` cursor sentinel is honored via `transcript.headSeq()`). Verified live: new chat's first turn = no digest.
+- **P1 serialization** — per-connection busy gate (one turn at a time per server, the agreed model) so a 2nd frame can't orphan the first turn's abortController.
+- **P1 digest perf** — peers scanned per turn capped at 16 (last_active-sorted).
+- **P2** — credential-exhausted-no-fallback turns no longer advance cross-chat cursors; dashboard blocks switching chats mid-turn.
+
+**Known limitations (deferred, tracked):**
+- Cross-channel: Telegram/WhatsApp (the `mobile` agent, separate transcript namespace) changes are NOT yet surfaced in web named-chat digests — cross-agent awareness is future work.
+- True concurrent turns per server are not supported (serialized by design); switching chats is free.
+- An LRU-evicted named-chat session (>1000 sessions) loses native `--resume` but is restored from the durable transcript re-seed (no data loss, just a recap).
+- OAuth-plan: built (claude-code `CLAUDE_CODE_OAUTH_TOKEN`); the OAuth-*token* turn is not yet live-verified (needs a user `sk-ant-oat01-…`).
 
 ## Recent operational changes (2026-06-01 · gateway v0.2.5 — chat fidelity + Stop)
 

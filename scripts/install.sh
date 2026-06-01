@@ -1957,6 +1957,9 @@ function connect() {
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "status", data: { step: msg.step } } }));
       } else if (msg.type === "phase") {
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "phase", data: { phase: msg.phase } } }));
+      } else if (msg.type === "cross_chat_digest") {
+        // Named chats: "caught up on N changes from other chats" awareness chip.
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "cross_chat_digest", data: { text: msg.text, peers: msg.peers } } }));
       } else if (msg.type === "done") {
         if (ccLifecycleStarted) { upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "end" } } })); }
         ccLifecycleStarted = false;

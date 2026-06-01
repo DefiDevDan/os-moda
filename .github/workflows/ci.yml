@@ -2,7 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
-    paths: ['packages/**', 'crates/**', 'scripts/**', 'osmoda-integration-kit/**', '.github/workflows/ci.yml']
+    paths: ['packages/**', 'crates/**', 'scripts/**', '.github/workflows/ci.yml']
   pull_request:
 jobs:
   gateway:
@@ -19,19 +19,10 @@ jobs:
           npx tsc
           node --test test/
 
-  integration-kit:
-    name: osmoda-integration-kit (typecheck + test)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - working-directory: osmoda-integration-kit
-        run: |
-          npm install --no-audit --no-fund
-          npx tsc --noEmit
-          npx tsc
-          node --test test/
+  # NOTE: osmoda-integration-kit (@osmoda/sdk) is its OWN git repo, published
+  # independently and intentionally NOT vendored here (see .gitignore). Its CI
+  # lives in that repo; a job here would `cd` into a directory absent on a clean
+  # checkout and fail. Re-add only if the kit is ever vendored back in.
 
   agentd:
     name: agentd (cargo check + test)

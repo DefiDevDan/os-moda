@@ -411,7 +411,9 @@ export const claudeCodeDriver = {
             /* readline close or abort — not an error */
         }
         const exitCode = await new Promise((resolve) => {
-            proc.on("close", (c) => resolve(c ?? 1));
+            let hardCapTimer = null;
+            proc.on("close", (c) => { if (hardCapTimer)
+                clearTimeout(hardCapTimer); resolve(c ?? 1); });
             // v1.3.24 — Hard cap bumped from 10 min to 8 hours by default.
             // Users running multi-hour build tasks (full app scaffolds, large
             // refactors, long-running scrapes) were hitting the 10-min wall
@@ -420,7 +422,7 @@ export const claudeCodeDriver = {
             //   2. This 8-hour absolute backstop for runaway processes
             // Override via env: OSMODA_CHAT_HARD_CAP_MS=<ms>.
             const hardCapMs = parseInt(process.env.OSMODA_CHAT_HARD_CAP_MS || "28800000", 10); // 8h
-            setTimeout(() => {
+            hardCapTimer = setTimeout(() => {
                 const pid = proc.pid;
                 if (typeof pid === "number") {
                     try {
@@ -430,6 +432,10 @@ export const claudeCodeDriver = {
                 }
                 resolve(124);
             }, hardCapMs);
+            // Don't let this backstop timer keep the event loop alive after the child
+            // exits (it's cleared on close above, but unref is belt-and-suspenders so
+            // `node --test` / any short-lived embedding can exit cleanly).
+            hardCapTimer.unref?.();
         });
         if (exitCode !== 0 && !hasOutput && !opts.abortSignal?.aborted) {
             const errMsg = stderrText.trim().split("\n").pop() || `claude exited with code ${exitCode}`;

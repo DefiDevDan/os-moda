@@ -23,8 +23,9 @@ Tests: 27 gateway tests green (chats 8, cross-chat 3, claude-code 2, openclaw 11
 - **P1 digest perf** — peers scanned per turn capped at 16 (last_active-sorted).
 - **P2** — credential-exhausted-no-fallback turns no longer advance cross-chat cursors; dashboard blocks switching chats mid-turn.
 
+**Cross-CHANNEL awareness (2026-06-01, follow-up):** Telegram/WhatsApp now participate. The Telegram handler writes its turns to the canonical transcript (keyed by the `mobile` agentId) and registers each conversation as a chat peer (`Chat.agentId`); `buildCrossChatDigest` reads each peer with its own agentId, so web named chats surface Telegram-originated changes and the Telegram turn gets the same digest — bidirectional. Also fixed a regression: the Telegram handler summed only `text` events, but both drivers now emit the final answer as `text_bulk` — replies were going out empty; now reads text_bulk (+ legacy text), ignores interim. +1 cross-channel test (28 gateway tests green).
+
 **Known limitations (deferred, tracked):**
-- Cross-channel: Telegram/WhatsApp (the `mobile` agent, separate transcript namespace) changes are NOT yet surfaced in web named-chat digests — cross-agent awareness is future work.
 - True concurrent turns per server are not supported (serialized by design); switching chats is free.
 - An LRU-evicted named-chat session (>1000 sessions) loses native `--resume` but is restored from the durable transcript re-seed (no data loss, just a recap).
 - OAuth-plan: built (claude-code `CLAUDE_CODE_OAUTH_TOKEN`); the OAuth-*token* turn is not yet live-verified (needs a user `sk-ant-oat01-…`).

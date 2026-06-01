@@ -84,7 +84,8 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
-RUNTIME="openclaw"  # openclaw (default/executive; the original osModa runtime — local-first, loads the 91-tool osmoda-bridge, accepts API key OR OAuth-as-token) or claude-code (peer; OAuth + API key)
+RUNTIME="claude-code"  # DEFAULT agent driver. claude-code (multi-chat: token streaming + named chats + cross-chat awareness + OAuth/API key) or openclaw (BYOK 91-tool plugin ecosystem; API key only; per-round buffered). Both route through osmoda-gateway, so named chats work for either.
+RELAY_MODE="gateway"   # "gateway" (relay → osmoda-gateway; named chats + transcript) or "openclaw-native" (--advanced-openclaw-native: relay → OpenClaw's own gateway; NO named chats). Decoupled from RUNTIME on purpose.
 SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
 DEFAULT_MODEL=""       # initial default model for the osmoda agent
 # Repeatable --credential flag. Each value: `label|provider|type|base64-secret`
@@ -109,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
     --runtime)           RUNTIME="$2"; shift 2 ;;
+    --advanced-openclaw-native) RELAY_MODE="openclaw-native"; RUNTIME="openclaw"; shift ;;
     --snapshot)          SNAPSHOT_MODE=true; shift ;;
     --default-model)     DEFAULT_MODEL="$2"; shift 2 ;;
     --credential)        CREDENTIALS+=("$2"); shift 2 ;;
@@ -127,7 +129,8 @@ while [[ $# -gt 0 ]]; do
       echo "                        provider ∈ {anthropic, openai, openrouter}"
       echo "                        type     ∈ {oauth, api_key}"
       echo "  --default-model NAME  Initial default model (e.g. claude-opus-4-6)"
-      echo "  --runtime NAME        Agent runtime: openclaw (default/executive) or claude-code"
+      echo "  --runtime NAME        Agent driver: claude-code (default; multi-chat + streaming + OAuth) or openclaw (BYOK plugins; API key)"
+      echo "  --advanced-openclaw-native  Bypass osmoda-gateway → OpenClaw's own gateway. Disables named chats/transcript. Advanced/self-host only."
       echo "  --branch NAME         Git branch to install (default: main)"
       echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
       echo "  --callback-url URL    Heartbeat callback URL (set by spawn.os.moda)"
@@ -1037,9 +1040,11 @@ if [ -n "$ORDER_ID" ]; then
   fi
 fi
 
-# Store runtime choice
+# Store runtime choice (agent driver) + relay connect mode (decoupled).
 printf '%s\n' "$RUNTIME" > "$STATE_DIR/config/runtime"
 chmod 644 "$STATE_DIR/config/runtime"
+printf '%s\n' "$RELAY_MODE" > "$STATE_DIR/config/relay-mode"
+chmod 644 "$STATE_DIR/config/relay-mode"
 
 # ---------------------------------------------------------------------------
 # Step 8: Set up API key (if provided) or generate placeholder config
@@ -1841,8 +1846,16 @@ const fs = require("fs");
 const crypto = require("crypto");
 
 const STATE_DIR = "/var/lib/osmoda";
-const RUNTIME = (() => { try { return fs.readFileSync(`${STATE_DIR}/config/runtime`, "utf8").trim(); } catch { return "openclaw"; } })();
-const IDENTITY_DIR = RUNTIME === "claude-code" ? `${STATE_DIR}/identity` : "/root/.openclaw/identity";
+const RUNTIME = (() => { try { return fs.readFileSync(`${STATE_DIR}/config/runtime`, "utf8").trim(); } catch { return "claude-code"; } })();
+// RELAY connect mode is DECOUPLED from the agent's runtime driver. Default
+// "gateway": the relay talks to osmoda-gateway (:18789), which routes to whatever
+// driver the agent uses (claude-code OR openclaw) — so the gateway-owned
+// transcript + NAMED CHATS work for BOTH runtimes. "openclaw-native" (only via
+// install.sh --advanced-openclaw-native) bypasses the gateway to OpenClaw's own
+// gateway and has NO named chats / transcript. See CLAUDE.md runtime notes.
+const RELAY_MODE = (() => { try { return fs.readFileSync(`${STATE_DIR}/config/relay-mode`, "utf8").trim(); } catch { return "gateway"; } })();
+const GATEWAY_MODE = RELAY_MODE !== "openclaw-native";
+const IDENTITY_DIR = GATEWAY_MODE ? `${STATE_DIR}/identity` : "/root/.openclaw/identity";
 const RECONNECT_DELAY = 5000;
 const OC_URL = "ws://127.0.0.1:18789";
 
@@ -1878,7 +1891,7 @@ function connect() {
   }
 
   const identity = loadDeviceIdentity();
-  if (!identity && RUNTIME === "openclaw") {
+  if (!identity && !GATEWAY_MODE) {
     console.error("[ws-relay] no device identity, retrying in 30s...");
     setTimeout(connect, 30000);
     return;
@@ -2041,8 +2054,8 @@ function connect() {
   }
 
   upstream.on("open", () => {
-    console.log("[ws-relay] connected to spawn server");
-    if (RUNTIME === "claude-code") {
+    console.log("[ws-relay] connected to spawn server (mode=" + RELAY_MODE + ")");
+    if (GATEWAY_MODE) {
       connectClaudeCode();
     } else {
       connectOpenClaw();
@@ -2055,11 +2068,13 @@ function connect() {
     try { msg = JSON.parse(data.toString()); } catch { return; }
 
     if (msg.type === "chat" && msg.text) {
-      if (RUNTIME === "claude-code") {
-        // Claude Code gateway: simple chat message
-        local.send(JSON.stringify({ type: "chat", text: msg.text, sessionKey: sessionKey }));
+      if (GATEWAY_MODE) {
+        // osmoda-gateway: simple chat frame. Forward the NAMED-CHAT id so the
+        // gateway routes to that chat's own session+transcript; "main" (the
+        // default) maps to this server's original conversation for continuity.
+        local.send(JSON.stringify({ type: "chat", text: msg.text, sessionKey: sessionKey, chatId: msg.chatId || "main" }));
       } else {
-        // OpenClaw: chat.send RPC
+        // OpenClaw native: chat.send RPC (no named chats — bypasses the gateway).
         const reqId = uid();
         pendingChat[reqId] = true;
         local.send(JSON.stringify({
@@ -2067,14 +2082,14 @@ function connect() {
           params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey }
         }));
       }
-      console.log("[ws-relay] chat:", msg.text.slice(0, 50));
+      console.log("[ws-relay] chat:", (msg.chatId || "main"), msg.text.slice(0, 50));
       return;
     }
     // Accept BOTH "chat_abort" (relay's own contract) and "abort" (what the
     // spawn-app's /chat-abort handler actually sends). The frame-type mismatch
     // silently dropped every Stop click here, so the agent kept spinning.
     if (msg.type === "chat_abort" || msg.type === "abort") {
-      if (RUNTIME === "claude-code") {
+      if (GATEWAY_MODE) {
         local.send(JSON.stringify({ type: "abort" }));
       } else {
         local.send(JSON.stringify({ type: "req", id: uid(), method: "chat.abort", params: { sessionKey } }));

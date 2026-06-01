@@ -360,10 +360,15 @@ wss.on("connection", (ws, req) => {
         // for existing conversations — and is lazily registered so it appears in
         // the chat list. "main"/legacy keys map to the Main chat for continuity.
         let sessionKey;
-        if (msg.chatId) {
+        const mainAlias = msg.chatId && /^(main|general|default|chat-main)$/i.test(msg.chatId.trim());
+        if (msg.chatId && !mainAlias) {
+            // A real named chat → its own key + session + transcript.
             sessionKey = chats.resolveOrCreate(msg.chatId).key;
         }
         else {
+            // "main"/legacy/none → the ORIGINAL conversation, keyed by the relay's
+            // sessionKey so existing --resume history + transcript carry over
+            // (zero-move migration); registered as "Main" for the chat list.
             sessionKey = msg.sessionKey || "ws-default";
             chats.register(sessionKey);
         }

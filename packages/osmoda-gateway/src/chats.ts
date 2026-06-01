@@ -40,6 +40,7 @@ export interface Chat {
   key: string;                       // the sessionKey/userId — the chat's identity
   name: string;                      // human display name
   slug: string;                      // slugified name (resolution handle)
+  agentId: string;                   // which agent owns this chat's transcript ("osmoda" web, "mobile" Telegram) — for cross-CHANNEL awareness
   created_at: number;
   last_active: number;
   archived: boolean;
@@ -91,6 +92,7 @@ export class ChatRegistry {
               key: c.key,
               name: typeof c.name === "string" ? c.name : c.key,
               slug: typeof c.slug === "string" ? c.slug : slugify(c.name || c.key),
+              agentId: typeof c.agentId === "string" ? c.agentId : "osmoda",
               created_at: typeof c.created_at === "number" ? c.created_at : Date.now(),
               last_active: typeof c.last_active === "number" ? c.last_active : Date.now(),
               archived: !!c.archived,
@@ -143,11 +145,17 @@ export class ChatRegistry {
    * legacy/canonical key becomes "Main"; other distinct keys become their own
    * chats so direct/test sessions never collapse into Main.
    */
-  register(key: string): Chat {
+  register(key: string, opts?: { agentId?: string; name?: string }): Chat {
     const existing = this.chats.get(key);
     if (existing) { this.touch(key); return existing; }
+    const agentId = opts?.agentId || "osmoda";
     let name: string, slug: string;
-    if (isLegacyMainKey(key) && !this.hasMain()) {
+    if (opts?.name) {
+      // Explicit name (e.g. a Telegram peer) — slug from the name, de-duped.
+      name = opts.name.slice(0, MAX_NAME);
+      slug = slugify(opts.name);
+      if (this.bySlug(slug)) slug = slug + "-" + (this.chats.size + 1);
+    } else if (isLegacyMainKey(key) && !this.hasMain()) {
       name = "Main"; slug = "main";
     } else {
       slug = slugify(key);
@@ -155,7 +163,7 @@ export class ChatRegistry {
       name = key;
     }
     const now = Date.now();
-    const chat: Chat = { key, name, slug, created_at: now, last_active: now, archived: false, cursors: {} };
+    const chat: Chat = { key, name, slug, agentId, created_at: now, last_active: now, archived: false, cursors: {} };
     this.chats.set(key, chat);
     this.scheduleSave();
     return chat;
@@ -197,7 +205,7 @@ export class ChatRegistry {
     let n = 2;
     while (this.chats.get(key)) { key = chatKeyForSlug(slug + "-" + n++); }
     const now = Date.now();
-    const chat: Chat = { key, name: raw.slice(0, MAX_NAME), slug, created_at: now, last_active: now, archived: false, cursors: {} };
+    const chat: Chat = { key, name: raw.slice(0, MAX_NAME), slug, agentId: "osmoda", created_at: now, last_active: now, archived: false, cursors: {} };
     this.chats.set(key, chat);
     this.scheduleSave();
     // eslint-disable-next-line no-console

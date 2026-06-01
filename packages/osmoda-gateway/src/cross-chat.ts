@@ -72,6 +72,10 @@ export function buildCrossChatDigest(
   const peers = chats.list(false).filter((c) => c.key !== currentChatKey).slice(0, MAX_PEERS_SCANNED);
 
   for (const peer of peers) {
+    // Read each peer's transcript with ITS OWN agentId — so a web chat (osmoda)
+    // also sees changes made via Telegram/WhatsApp (the "mobile" agent), and
+    // vice versa. Cross-CHANNEL awareness, not just cross-chat.
+    const peerAgent = peer.agentId || agentId;
     const cursor = chats.getCursor(currentChatKey, peer.key); // -1 if unseen
     if (cursor < 0) {
       // Unseen peer → START CAUGHT-UP to its head: emit NO digest now (never
@@ -79,10 +83,10 @@ export function buildCrossChatDigest(
       // commit the head cursor — even head=0 — so the next turn enters the delta
       // branch and surfaces work done AFTER this point (committing only on head>0
       // would leave the cursor at -1 and silently swallow the peer's next rows).
-      advance.push({ peerKey: peer.key, seq: transcripts.headSeq(agentId, peer.key) });
+      advance.push({ peerKey: peer.key, seq: transcripts.headSeq(peerAgent, peer.key) });
       continue;
     }
-    const evs = transcripts.read(agentId, peer.key, cursor);
+    const evs = transcripts.read(peerAgent, peer.key, cursor);
     if (!evs.length) continue;
     // Advance to this peer's head regardless of notability, so we never re-scan
     // already-seen rows (incl. pure reads) next turn.

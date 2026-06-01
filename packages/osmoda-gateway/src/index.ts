@@ -629,26 +629,51 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
 
   const session = sessions.getOrCreate(chatId, "telegram", agent.id, agent.runtime);
   const systemPrompt = loadSystemPrompt(agent);
-  let fullText = "";
 
+  // Register this Telegram conversation as a cross-CHANNEL peer + record its
+  // turns in the canonical transcript (keyed by the mobile agentId), so its
+  // changes are visible to web named chats — and it sees theirs.
+  chats.register(chatId, { agentId: agent.id, name: `Telegram ${chatId}` });
+  chats.touch(chatId);
+  transcripts.append(agent.id, chatId, { role: "user", text: message.text, source: "telegram" });
+
+  // Cross-chat awareness: prepend a digest of changes other chats/channels made.
+  let messageToSend = message.text;
+  let tgAdvance: Array<{ peerKey: string; seq: number }> = [];
+  try {
+    const dg = buildCrossChatDigest(transcripts, chats, agent.id, chatId);
+    tgAdvance = dg.advance;
+    if (dg.text) messageToSend = `${dg.text}\n\n${messageToSend}`;
+  } catch { /* awareness is best-effort — never block a Telegram reply */ }
+
+  let fullText = "";
+  let turnText = "";
+  let delivered = false;
   try {
     for await (const event of driver.startSession({
       agent, credential, model: agent.model, systemPrompt,
       mcpConfigPath: getMcpConfigPath(env.mcpBridgePath),
-      message: message.text,
+      message: messageToSend,
       sessionId: session.claudeSessionId,
       workingDir: agent.profile_dir,
     })) {
-      if (event.type === "text" && event.text) fullText += event.text;
-      if (event.type === "session" && event.sessionId) {
-        sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime);
-      }
-      if (event.type === "done" && event.sessionId) {
-        sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime);
-      }
+      // Two-channel contract: the FINAL answer is text_bulk (both drivers). The
+      // old code only summed `text`, which neither driver emits anymore → empty
+      // Telegram replies. Capture text_bulk (primary) + text (legacy fallback);
+      // ignore interim_text (that's thinking, not the reply).
+      if (event.type === "text_bulk" && event.text) { fullText = event.text; turnText = event.text; delivered = true; }
+      else if (event.type === "text" && event.text) { fullText += event.text; turnText += event.text; delivered = true; }
+      else if (event.type === "tool_use") { transcripts.append(agent.id, chatId, { role: "tool", kind: "use", name: event.name, target: event.target }); }
+      else if (event.type === "tool_result") { transcripts.append(agent.id, chatId, { role: "tool", kind: "result", outcome: event.outcome }); }
+      else if (event.type === "session" && event.sessionId) { sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime); }
+      else if (event.type === "done" && event.sessionId) { sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime); }
+      else if (event.type === "error" && event.text && !fullText) { fullText = event.text; }
     }
   } catch (e: any) { fullText = `Error: ${e?.message || String(e)}`; }
 
+  if (turnText.trim()) transcripts.append(agent.id, chatId, { role: "assistant", text: turnText });
+  // Advance cross-chat cursors only on a delivered turn (parity with the web path).
+  if (delivered) for (const a of tgAdvance) chats.setCursor(chatId, a.peerKey, a.seq);
   if (fullText) await sendTelegram(env.telegramBotToken, chatId, fullText);
 }
 

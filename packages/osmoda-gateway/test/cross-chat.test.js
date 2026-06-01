@@ -53,6 +53,22 @@ test("new chat starts CAUGHT-UP (no backlog flood), then sees only changes made 
   assert.equal(buildCrossChatDigest(transcripts, chats, AGENT, A.key).text, null);
 });
 
+test("cross-CHANNEL: a web chat's digest surfaces Telegram (mobile-agent) changes", () => {
+  const { transcripts, chats } = fixture("xchannel");
+  const web = chats.resolveOrCreate("Infra"); // agentId "osmoda"
+  const tg = chats.register("tg-555", { agentId: "mobile", name: "Telegram 555" });
+  assert.equal(tg.agentId, "mobile", "Telegram peer is owned by the mobile agent");
+  // Catch the web chat up to the (empty) Telegram head first.
+  for (const a of buildCrossChatDigest(transcripts, chats, "osmoda", web.key).advance) chats.setCursor(web.key, a.peerKey, a.seq);
+  // A change made via Telegram is written under the mobile agent's transcript.
+  transcripts.append("mobile", tg.key, { role: "tool", kind: "use", name: "Write", target: "/srv/deployed-via-phone.js" });
+  // The web chat (osmoda agent) must still see it — cross-CHANNEL, not just cross-chat.
+  const dg = buildCrossChatDigest(transcripts, chats, "osmoda", web.key);
+  assert.ok(dg.text, "web chat sees the Telegram-originated change");
+  assert.match(dg.text, /Telegram 555/);
+  assert.match(dg.text, /deployed-via-phone\.js/);
+});
+
 test("a chat never sees its OWN activity, and a lone chat has no digest", () => {
   const { transcripts, chats } = fixture("b");
   const only = chats.resolveOrCreate("Solo");

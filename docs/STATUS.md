@@ -4,6 +4,17 @@ Honest assessment of what works, what's placeholder, and what's next.
 
 Last updated: 2026-06-01
 
+## Named chats + cross-chat awareness (2026-06-01 · gateway v0.3.0)
+
+| Area | Change | Status |
+|---|---|---|
+| **Named chats** | Multiple distinct persistent conversations per server. Each `chatId` routes to its own gateway session (`--resume`) + transcript + native compaction. `ChatRegistry` (`state/chats.json`); `/chats` REST (list/create/rename/archive); zero-move migration ("main"/legacy chatId → the original conversation key, history preserved). Backward-compatible. | **Live-verified**: created 2 chats, isolated transcripts (`chat-lir-scrapers.jsonl` + `chat-infra-hardening.jsonl`), separate `--resume` sessions. |
+| **Cross-chat awareness** | Bounded, deterministic since-cursor digest of OTHER chats' notable tool-rows — sourced from the gateway's own per-chat transcripts (the agentd ledger was rejected: it has no file/deploy/service events). Injected into the turn (not the system prompt) + a human-visible "caught up on N changes" chip. Per-peer cursors commit only on success; zero overhead for single-chat work. | **Live-verified**: a turn in chat B received `digest peers=1` reflecting chat A's `echo` tool-use. |
+| **Runtime differentiation** | `claude-code` is the default chat driver (token streaming + named chats + OAuth/API key). The ws-relay runs in **gateway mode** for both drivers (so named chats work for openclaw-via-gateway), decoupled from the agent driver; openclaw-native bypass is behind `install.sh --advanced-openclaw-native`. New spawns default to claude-code. | Shipped to `main` (install.sh); new spawns inherit. |
+| **OAuth plan** | claude-code runs on a Claude Pro/Max OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`); Engine tab gates credential type by `supported_auth_types`. | Built; OAuth-token live turn pending a user-supplied `sk-ant-oat01-…`. |
+
+Tests: 26 gateway tests green (chats 7, cross-chat 3, claude-code 2, openclaw 11, credentials 3), `node --test` exits clean. CI green.
+
 ## Recent operational changes (2026-06-01 · gateway v0.2.5 — chat fidelity + Stop)
 
 | Area | Change | Why |

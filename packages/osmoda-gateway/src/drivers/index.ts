@@ -7,10 +7,12 @@
 import type { RuntimeDriver } from "./types.js";
 import { claudeCodeDriver } from "./claude-code.js";
 import { openClawDriver } from "./openclaw.js";
+import { managedAgentDriver } from "./managed-agent.js";
 
 export const allDrivers: Record<string, RuntimeDriver> = {
   [claudeCodeDriver.name]: claudeCodeDriver,
   [openClawDriver.name]: openClawDriver,
+  [managedAgentDriver.name]: managedAgentDriver,
 };
 
 export function getDriver(name: string): RuntimeDriver | null {

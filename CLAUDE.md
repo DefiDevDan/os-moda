@@ -40,8 +40,9 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 2. **osmoda-gateway** (TypeScript, **v0.2.1**) - **Modular agent gateway**. HTTP+WS server on 127.0.0.1:18789
    (binds to localhost; public reach is via the spawn-server SSH proxy). Always the systemd unit.
    Routes per-agent to a pluggable runtime driver:
-   - `claude-code` driver - wraps `claude` CLI (OAuth or API key)
-   - `openclaw` driver - spawns `openclaw` binary as child process per session
+   - `claude-code` driver - wraps `claude` CLI (OAuth or API key). **LOCAL** execution (root on this box) — the tier-0 system agent.
+   - `openclaw` driver - spawns `openclaw` binary as child process per session. **LOCAL** execution.
+   - `managed-agent` driver (prototype) - Anthropic **Managed Agents** via the `ant` CLI (`beta:agents/environments/sessions`). The agent runs in Anthropic's **CLOUD sandbox**, NOT on this box — so it's for the SANDBOXED/app/workload tier (untrusted tools, deploy-ai-agent, scale-out workers), NOT the tier-0 system agent. api_key only (with Managed Agents beta access); health-gated on the `ant` binary. Stream events map to the same osModa contract, so the relay + dashboard render it identically. (Maps the beta event schema permissively — confirm against one real run.)
    - Adding a driver = one file under `src/drivers/` (Codex, Bedrock, …)
    Hot-reloadable config via `agents.json` (SIGHUP re-reads, in-flight sessions keep
    their snapshot - zero WS drops). Encrypted credential store at

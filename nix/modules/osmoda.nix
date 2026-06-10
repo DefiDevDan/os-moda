@@ -74,7 +74,7 @@ in {
     # --- Gateway (Claude Code SDK or OpenClaw) ---
     gateway = {
       enable = mkOption { type = types.bool; default = true; description = "Enable osModa Gateway"; };
-      runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "openclaw"; description = "Agent runtime: openclaw (default/executive — the original osModa runtime, local-first, loads the 91-tool osmoda-bridge, accepts API key or OAuth-as-token) or claude-code (peer; OAuth + API key)"; };
+      runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "claude-code"; description = "Agent runtime: claude-code (default — token streaming + persistent named chats + cross-chat awareness, OAuth subscription or API key) or openclaw (BYOK multi-provider runtime that loads the 92-tool osmoda-bridge plugin; API key only). Switchable per-agent at runtime from the dashboard (no rebuild). Matches install.sh's default."; };
       port = mkOption { type = types.port; default = 18789; description = "Gateway port (user-facing)"; };
       internalPort = mkOption { type = types.port; default = 18790; description = "Internal gateway port (used when osModa UI fronts it)"; };
       model = mkOption { type = types.str; default = "anthropic/claude-opus-4-6"; description = "Default LLM model (main agent)"; };

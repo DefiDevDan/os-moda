@@ -6,7 +6,7 @@
 
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-10 Rust daemons. 91 structured tools. **Modular agent runtime** — swap between Claude Code (default) and OpenClaw without SSH or rebuilds. **Pre-indexed code knowledge graph** (CodeGraph) so the agent navigates codebases — including the OS's own source — without grep-spraying. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+10 Rust daemons. 92 structured tools. **Modular agent runtime** — swap between Claude Code (default), OpenClaw, and a cloud managed-agent driver without SSH or rebuilds. **Persistent named chats** — multiple distinct conversations per server, each with its own session, transcript, and auto-compaction, plus cross-chat and cross-channel awareness. **Pre-indexed code knowledge graph** (CodeGraph) so the agent navigates codebases — including the OS's own source — without grep-spraying. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
 > **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
@@ -14,8 +14,8 @@
 [![Beta](https://img.shields.io/badge/Status-Public%20Beta-yellow.svg)]()
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
-[![Tests](https://img.shields.io/badge/Tests-205%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-91-blueviolet.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-247-brightgreen.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-92-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
@@ -38,7 +38,7 @@
 
 Every AI agent framework assumes your infrastructure is someone else's problem. They give you an agent that can think — but nowhere for it to live. So you SSH into a VPS, install things manually, pray nothing breaks at 3am, and when it does, you're the one waking up.
 
-osModa is the other half: **the machine itself is AI-native.** 91 structured tools across 10 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
+osModa is the other half: **the machine itself is AI-native.** 92 structured tools across 10 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
 
 **Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. This makes AI root access meaningfully safer than on any traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
 
@@ -159,16 +159,17 @@ agentctl verify-ledger
 
 ## Architecture
 
-10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One modular gateway (`osmoda-gateway`, TypeScript) drives pluggable runtime drivers: `claude-code` (default, supports OAuth subscriptions or API keys) and `openclaw` (multi-provider BYOK CLI, API-key only — does not accept OAuth). Each agent picks its own runtime + credential + model; switch at runtime via the dashboard — no rebuilds.
+10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One modular gateway (`osmoda-gateway`, TypeScript) drives pluggable runtime drivers: `claude-code` (default, supports OAuth subscriptions or API keys), `openclaw` (multi-provider BYOK CLI, API-key only — does not accept OAuth), and a prototype `managed-agent` driver (runs in Anthropic's cloud sandbox — for untrusted / scale-out workloads, **not** the tier-0 system agent). Each agent picks its own runtime + credential + model; switch at runtime via the dashboard — no rebuilds.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  osmoda-gateway (modular, TypeScript) — ONE systemd unit                      │
-│  ├─ claude-code driver    spawns `claude` CLI per session                     │
-│  ├─ openclaw driver       spawns `openclaw` binary per session                │
-│  └─ future drivers        drop-in files under src/drivers/                    │
+│  ├─ claude-code driver   `claude` CLI/session — DEFAULT (streams + chats)     │
+│  ├─ openclaw driver      `openclaw`/session — BYOK multi-provider, API-key    │
+│  ├─ managed-agent driver Anthropic cloud sandbox — untrusted/scale-out work   │
+│  └─ future drivers       drop-in files under src/drivers/                     │
 │                                                                               │
 │  Multi-Agent Router (hot-reloadable via agents.json)                          │
 │  ├─ osmoda agent (Opus)         92 tools · 20 skills · full access · web      │
@@ -225,10 +226,10 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 | **NixOS atomic rollback** | Every system change is a generation. Bad config? One command reverts the entire OS state. |
 | **Hash-chained audit ledger** | Every action creates a SHA-256-chained event in SQLite. Tamper-evident. Verifiable offline with `agentctl verify-ledger`. 321+ events verified on live server with zero broken links. |
 | **SafeSwitch deploys** | Changes go through a probation period with health checks. If any check fails, automatic rollback to the previous generation. |
-| **Command blocklist** | 17 dangerous command patterns blocked in `shell_exec` (rm -rf, dd, mkfs, etc.). Expanded and pentest-verified. |
+| **Command blocklist** | 17 dangerous command patterns blocked in the structured `shell_exec` tool (rm -rf, dd, mkfs, etc.). Expanded and pentest-verified. *(Scope: `shell_exec`. The default agent's native `Bash` tool is not yet routed through it — see [below](#what-the-default-agent-bypasses-today).)* |
 | **Rate limiting** | All public endpoints enforce rate limits (shell_exec: 30/60s, mesh TCP: 5/60s). |
 | **Socket permissions** | All Unix sockets are 0600 (owner-only). All 10 daemons enforce `umask(0o077)` at startup. |
-| **Approval gates** | Destructive operations require explicit approval via `approval_request`/`approval_approve`. Time-limited with auto-expiry. |
+| **Approval gates** | Destructive operations *through the structured tools* require explicit approval via `approval_request`/`approval_approve`. Time-limited with auto-expiry. *(Not yet enforced on the default agent's native `Bash`/`Write`/`Edit` — see [below](#what-the-default-agent-bypasses-today).)* |
 | **Fleet coordination** | Multi-server changes go through quorum voting via `fleet_propose`/`fleet_vote` before applying. |
 | **Safety commands** | `safety_rollback`, `safety_panic`, `safety_status`, `safety_restart` bypass the AI entirely — the user always has an escape hatch. |
 | **Pentest verified** | Full automated pentest: injection attacks (SQL, path traversal, shell), payload bombs, error hardening, stress testing (700/700 concurrent health checks). All pass. |
@@ -236,6 +237,12 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 | **Driver health checks** | Every runtime driver implements `healthCheck()`. The gateway probes the binary's CLI shape before allowing a runtime swap. Unhealthy drivers return `422 driver_unavailable` with the exact error + remediation rather than letting chat silently fail later. Caught the 2026-05-14 OpenClaw `run`→`agent` CLI rename within the same hour. |
 | **Process-group abort** | The Stop button kills the entire subprocess tree (`detached: true` spawn + group-signal + 2 s SIGKILL escalation), not just the runtime leader. Bash spawned by the agent, file I/O, child processes — all stopped at once. |
 | **Dual-signal wedge detector** | A server is flagged "wedged" only when both `last_heartbeat` AND `agent_last_frame_at` are stale ≥5 min. Eliminated the false-positive class where the heartbeat sender was broken but the agent was happily answering chat. |
+
+### What the default agent bypasses today
+
+**Be precise about what is and isn't enforced.** The blocklist, approval gate, and audit ledger above sit in front of the structured MCP tools (`shell_exec`, `file_write`, `safe_switch_*`, …). But the default `claude-code` runtime also gives the agent the **native `Bash`, `Write`, and `Edit` tools**, which execute directly and **currently bypass the blocklist, the approval gate, and the ledger.** So today, governance of the tier-0 agent rests on NixOS atomic rollback, spending limits, and audit review — *not* on per-action approval of everything the agent does.
+
+A **PreToolUse enforcement hook** that routes the native tools through agentd's approval + hash-chained ledger is the top safety priority (in progress, not yet shipped). Until it lands, run osModa on disposable/dedicated boxes, set provider spend limits, and review the ledger — and treat "every mutation is approval-gated" as the *goal*, not the current guarantee. See [STATUS.md](docs/STATUS.md) and [SECURITY.md](docs/SECURITY.md).
 
 ### What NixOS rollback covers — and what it doesn't
 
@@ -245,6 +252,7 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 
 ### What's planned but not yet complete
 
+- **Tier-0 tool-gate enforcement (PreToolUse hook)** — route the default agent's native `Bash`/`Write`/`Edit` through agentd's approval + audit ledger, so the blocklist and approval gate cover the path the agent actually uses (today they cover only the structured `shell_exec`/`file_write` tools). This is the top safety item.
 - **Tier 1/Tier 2 sandbox enforcement** — the trust tier model is designed and `sandbox_exec` exists, but bubblewrap isolation isn't fully wired for all third-party tools yet.
 - **Capability token auth** — `capability_mint` can create time-limited tokens, but socket authentication is still primarily file-permissions based.
 - **External security audit** — mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but hasn't had independent review.
@@ -295,7 +303,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 
 > **Note:** `wallet/send` signs an intent string, not a fully-encoded blockchain transaction. Broadcasting requires external tooling. See [STATUS.md](docs/STATUS.md) for details.
 
-### 90 Bridge Tools
+### 92 Bridge Tools
 
 The AI doesn't shell out. It calls typed tools that return structured JSON:
 
@@ -332,7 +340,7 @@ wallet_receipt         wallet_build_tx        safety_rollback
 safety_status          safety_panic           safety_restart
 ```
 
-### 19 System Skills
+### 20 System Skills
 
 Predefined behavioral patterns the agent can follow:
 
@@ -349,6 +357,7 @@ Predefined behavioral patterns the agent can follow:
 **Deploy AI agent** — deploy AI agent workloads (LangChain, CrewAI, AutoGen, custom) with GPU checks, API key management, and health monitoring.
 **Swarm predict** — multi-perspective risk analysis using 6-8 expert persona debate before infrastructure changes, with SafeSwitch integration.
 **Scaled swarm predict** — large-scale social simulation with 50-200 demographically diverse personas on simulated Twitter/Reddit boards for outcome prediction.
+**Spec-driven development** — the github/spec-kit workflow (`specify init` / plan / implement) wired into the agent and backed by CodeGraph.
 Plus: system monitor, package manager, config editor, file manager, network manager, service explorer.
 
 ### Remote Access
@@ -490,7 +499,7 @@ POST /wallet/send          Build signed intent (no broadcast — see STATUS.md)
 git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 
 cargo check --workspace        # Type check all 10 crates
-cargo test --workspace         # 205 tests (all green)
+cargo test --workspace         # 213 Rust tests (+ 34 gateway via `npm test` in packages/osmoda-gateway = 247)
 
 # Run agentd standalone
 cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
@@ -517,7 +526,7 @@ crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
 packages/osmoda-gateway/    Modular gateway (drivers + agents.json + credentials, HTTP+WS+Telegram)
-  └── src/drivers/          { claude-code, openclaw } — pluggable runtime drivers
+  └── src/drivers/          { claude-code, openclaw, managed-agent } — pluggable runtime drivers
 packages/osmoda-mcp-bridge/ MCP server (92 tools over stdio protocol)
 packages/osmoda-bridge/     OpenClaw plugin (92 tools, used by openclaw driver)
 packages/osmoda-client/     First-party TypeScript SDK for the spawn.os.moda v1 API
@@ -535,16 +544,16 @@ skills/                     19 system skill definitions
 
 ## Status
 
-> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 205 passing tests, pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges. That's the price of being early to something new.
+> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 247 tests (213 Rust + 34 gateway), pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges — and the tier-0 agent's native tools aren't fully gated yet (see [Safety Model](#safety-model)). That's the price of being early to something new.
 
 **The numbers:**
 - 10 Rust crates (10 daemons + 1 CLI)
-- 205 tests passing (all green)
-- 90 bridge tools registered
+- 247 tests (213 Rust workspace + 34 gateway; gateway suite green via `npm test`, Rust CI-gated)
+- 92 bridge tools registered
 - 20 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 
-**What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, pre-indexed code knowledge graph (CodeGraph — `codegraph_search/context/impact/callers/callees/…`, auto-indexed across the OS source + workspaces + deployed apps), SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).
+**What works today:** Structured system access, hash-chained audit ledger, persistent named chats (multiple distinct conversations per server, each with its own session + transcript + auto-compaction) with cross-chat and cross-channel awareness, token-streaming chat across both default drivers, FTS5 full-text memory search, pre-indexed code knowledge graph (CodeGraph — `codegraph_search/context/impact/callers/callees/…`, auto-indexed across the OS source + workspaces + deployed apps), SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive *structured-tool* ops (native-tool gating in progress — see [Safety Model](#safety-model)), sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).
 
 **What's next:** Semantic memory engine (usearch + fastembed), external security audit of mesh crypto, end-to-end integration tests, WebRTC browser-to-server connections.
 
@@ -589,7 +598,7 @@ Payment via Coinbase x402 protocol (USDC on Base or Solana). Full API docs at [`
 
 ## In the wild
 
-- **[spawn.os.moda](https://spawn.os.moda)** — hosted provisioning. Public x402-payable API, live ERC-8004 agent card, v1.2 modular runtime, **github/spec-kit baked into every spawn**.
+- **[spawn.os.moda](https://spawn.os.moda)** — hosted provisioning. Public x402-payable API, live ERC-8004 agent card, v1.3 modular runtime + persistent named chats, **github/spec-kit baked into every spawn**.
 - **Spec-driven dev support** — every new spawn comes with `uv` + `specify-cli` + the 9 `speckit-*` skills. Run `specify init` and you're in the github/spec-kit ecosystem (92K stars). See `skills/spec-driven-development/SKILL.md` and the [`SPEC-KIT-INTEGRATION`](docs/planning/SPEC-KIT-INTEGRATION.md) deep dive.
 - *Your deployment here →* open a PR adding a one-line description + link.
 

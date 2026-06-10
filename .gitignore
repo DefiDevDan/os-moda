@@ -99,3 +99,7 @@ __pycache__/
 
 # Separate publishable SDK repo — ships independently, not vendored here
 osmoda-integration-kit/
+
+# Internal planning docs — map UNFIXED liabilities, must never reach the public repo
+docs/PRODUCTION-ROADMAP.md
+docs/planning/EXECUTION-PLAN.md

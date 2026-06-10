@@ -6,7 +6,7 @@
 >
 > **Targets (initial — to harden quarterly):** RTO ≤ 4 h, RPO ≤ 24 h.
 > RPO is bounded by the backup cadence (daily at 04:13 UTC per
-> [`OPENCLAW-EXECUTIVE-PLAN.md`](../OPENCLAW-EXECUTIVE-PLAN.md) + goal P0a).
+> [`OPENCLAW-EXECUTIVE-PLAN.md`](planning/OPENCLAW-EXECUTIVE-PLAN.md) + goal P0a).
 
 ## What can fail
 1. **Box disk loss** (Hetzner volume corruption). Most likely DR scenario.

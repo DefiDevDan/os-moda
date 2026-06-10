@@ -63,6 +63,20 @@ let
   generatedGatewayConfigFile = pkgs.writeText "gateway-config.json" (builtins.toJSON gatewayConfig);
   generatedOpenclawConfigFile = pkgs.writeText "openclaw-config.json" (builtins.toJSON openclawConfig);
 
+  # Tier-0 PreToolUse approval hook for the claude-code driver: routes the agent's
+  # native Bash/Write/Edit through agentd's ApprovalGate + hash-chained ledger (same
+  # policy as the structured shell_exec/file_write MCP tools). The driver passes this
+  # to `claude --settings` when OSMODA_CLAUDE_SETTINGS is set (below).
+  claudeHookSettingsFile = pkgs.writeText "claude-settings.json" (builtins.toJSON {
+    hooks.PreToolUse = [{
+      matcher = "Bash|Write|Edit|MultiEdit|NotebookEdit";
+      hooks = [{
+        type = "command";
+        command = "${pkgs.nodejs}/bin/node ${cfg.stateDir}/packages/osmoda-gateway/hooks/pretooluse-approval.mjs";
+      }];
+    }];
+  });
+
   effectiveConfigFile =
     if cfg.gateway.configFile != null then cfg.gateway.configFile
     else if cfg.gateway.runtime == "openclaw" then generatedOpenclawConfigFile
@@ -424,6 +438,9 @@ in {
         OSMODA_MESH_SOCKET = cfg.mesh.socketPath;
         OSMODA_MCPD_SOCKET = cfg.mcp.socketPath;
         OSMODA_TEACHD_SOCKET = cfg.teachd.socketPath;
+        # Tier-0 safety: claude-code driver routes native Bash/Write/Edit through
+        # agentd's ApprovalGate via this PreToolUse hook settings file.
+        OSMODA_CLAUDE_SETTINGS = "${claudeHookSettingsFile}";
         HOME = "/root";
       };
     };

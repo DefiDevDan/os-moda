@@ -84,6 +84,47 @@ Notice what's **not** in this list: tool-level permissions, rate-limit buckets, 
 
 ---
 
+### Tier-0 tool gate — the PreToolUse approval hook
+
+Historically the destructive-command blocklist + the ApprovalGate sat in front of the
+**structured** MCP tools (`shell_exec`, `file_write`, `system.mutate`, `wallet.send`), but
+the default claude-code agent also has the **native** `Bash`/`Write`/`Edit` tools, which
+executed directly and bypassed all three. That gap is now closed by a **PreToolUse hook**.
+
+**How it works.** The claude-code driver passes `claude --settings <file>` (env
+`OSMODA_CLAUDE_SETTINGS`, written by `install.sh` + the NixOS module). The settings register
+a PreToolUse hook (`packages/osmoda-gateway/hooks/pretooluse-approval.mjs`) matching
+`Bash|Write|Edit|MultiEdit|NotebookEdit`:
+
+- **Bash** → the command is POSTed to agentd `POST /approval/check` over the Unix socket.
+  agentd's tested matcher decides: non-destructive → allow; destructive without an approved
+  `approval_id` → **deny** with an actionable reason. Every *gated* (destructive) decision is
+  appended to the hash-chained ledger (`approval.check`), so native-tool actions are now auditable.
+- **Write/Edit** → a small self-protect path set (the credential store, `gateway-token`, the
+  hook's own settings, `~/.ssh` keys) requires approval. Editing ordinary system config
+  (NixOS modules, app code) is deliberately **allowed** — that's the agent's job.
+- The hook **only ever blocks**; it never force-approves, so it can't weaken any other check.
+
+**Status (2026-06-11): implemented + unit-tested, live end-to-end verification pending.**
+40 gateway tests + 50 agentd tests are green, including the hook's decision logic and the
+ApprovalGate matcher. The full `claude → hook → agentd` round-trip has NOT yet been exercised
+on a running box — until it is, treat this as "shipped, not yet field-verified." To verify on a box:
+
+```bash
+# 1. confirm the agent is launched with the hook settings
+journalctl -u osmoda-gateway | grep -- '--settings'
+# 2. ask the agent (or simulate) a destructive Bash command, e.g. "run: rm -rf /" — it must be
+#    DENIED with an ApprovalGate reason, and a deny event must appear in the ledger:
+agentctl events --type approval.check | tail
+# 3. a benign command ("run: ls /") must succeed.
+```
+
+**Known limits.** (1) If agentd is unreachable the hook fails **open** except for a tiny local
+catastrophic backstop (`rm -rf /`, `mkfs`, `dd of=/dev/…`, fork-bomb, `curl … | sh`) — agentd
+being down is an outage, and the wedge detector should catch it. (2) `approval_approve` is still
+reachable by the agent's toolset, so a denied action could in principle be self-approved; the
+follow-up is to make approval decisions operator-only (a known item, tracked in the execution plan).
+
 ## Attack surface by entry point
 
 ### External

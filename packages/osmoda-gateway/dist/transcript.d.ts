@@ -38,6 +38,13 @@ export declare class TranscriptStore {
     private fileFor;
     /** Append one event. Best-effort — never throws into the chat path. */
     append(agentId: string, sessionKey: string, ev: TranscriptInput): void;
+    /**
+     * Highest seq currently on disk for this key (0 if none). For an append-only
+     * file seq == line count, so this is one cheap read with no JSON parse — used
+     * by the cross-chat digest to mark a brand-new chat "caught up to head"
+     * WITHOUT materializing the peer's whole backlog.
+     */
+    headSeq(agentId: string, sessionKey: string): number;
     /** Read events with seq > sinceSeq. */
     read(agentId: string, sessionKey: string, sinceSeq?: number): TranscriptEvent[];
     /** List all known session transcripts with light metadata. */

@@ -45,14 +45,28 @@ pub async fn approval_check_command_handler(
         )
     })?;
     let is_destructive = gate.is_destructive(&req.command);
-    match gate.check_and_reject(&req.command, req.approval_id.as_deref()) {
-        Ok(()) => Ok(Json(ApprovalCheckResponse { allow: true, is_destructive, reason: None })),
-        Err(e) => Ok(Json(ApprovalCheckResponse {
-            allow: false,
-            is_destructive,
-            reason: Some(e.to_string()),
-        })),
+    let (allow, reason) = match gate.check_and_reject(&req.command, req.approval_id.as_deref()) {
+        Ok(()) => (true, None),
+        Err(e) => (false, Some(e.to_string())),
+    };
+
+    // Audit every GATED (destructive) decision to the hash-chained ledger. This is
+    // the path the PreToolUse hook drives for the tier-0 agent's native Bash tool,
+    // so it's where native-tool actions finally become auditable — not just the
+    // structured shell_exec/file_write tools. Benign (non-destructive) calls are
+    // not logged, to keep the ledger meaningful.
+    if is_destructive {
+        let payload = serde_json::json!({
+            "command": req.command,
+            "allow": allow,
+            "approval_id": req.approval_id,
+            "reason": reason,
+        });
+        let ledger = state.ledger.lock().await;
+        let _ = ledger.append("approval.check", "agent", &payload.to_string());
     }
+
+    Ok(Json(ApprovalCheckResponse { allow, is_destructive, reason }))
 }
 
 #[derive(Debug, Deserialize)]

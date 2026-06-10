@@ -1521,6 +1521,27 @@ ExecStartPre=+${MKDIR_BIN} -p $STATE_DIR
 WantedBy=multi-user.target
 EOF
 
+# Tier-0 PreToolUse approval hook (claude-code driver). Routes the agent's native
+# Bash/Write/Edit through agentd's ApprovalGate + hash-chained ledger — the same
+# policy that guards the structured shell_exec/file_write MCP tools. The claude-code
+# driver passes this file to `claude --settings` when OSMODA_CLAUDE_SETTINGS is set.
+mkdir -p "$STATE_DIR/config"
+cat > "$STATE_DIR/config/claude-settings.json" <<EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "$(which node) $GATEWAY_DIR/hooks/pretooluse-approval.mjs" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+chmod 0644 "$STATE_DIR/config/claude-settings.json"
+
 # Agent gateway service (runtime-dependent)
 if [ "$RUNTIME" = "claude-code" ]; then
 cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
@@ -1547,6 +1568,7 @@ Environment=OSMODA_VOICE_SOCKET=$RUN_DIR/voice.sock
 Environment=OSMODA_MESH_SOCKET=$RUN_DIR/mesh.sock
 Environment=OSMODA_MCPD_SOCKET=$RUN_DIR/mcpd.sock
 Environment=OSMODA_TEACHD_SOCKET=$RUN_DIR/teachd.sock
+Environment=OSMODA_CLAUDE_SETTINGS=$STATE_DIR/config/claude-settings.json
 
 [Install]
 WantedBy=multi-user.target

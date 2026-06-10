@@ -242,7 +242,7 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 
 **Be precise about what is and isn't enforced.** The blocklist, approval gate, and audit ledger above sit in front of the structured MCP tools (`shell_exec`, `file_write`, `safe_switch_*`, …). But the default `claude-code` runtime also gives the agent the **native `Bash`, `Write`, and `Edit` tools**, which execute directly and **currently bypass the blocklist, the approval gate, and the ledger.** So today, governance of the tier-0 agent rests on NixOS atomic rollback, spending limits, and audit review — *not* on per-action approval of everything the agent does.
 
-A **PreToolUse enforcement hook** that routes the native tools through agentd's approval + hash-chained ledger is the top safety priority (in progress, not yet shipped). Until it lands, run osModa on disposable/dedicated boxes, set provider spend limits, and review the ledger — and treat "every mutation is approval-gated" as the *goal*, not the current guarantee. See [STATUS.md](docs/STATUS.md) and [SECURITY.md](docs/SECURITY.md).
+A **PreToolUse enforcement hook** that routes the native tools through agentd's approval + hash-chained ledger is now **implemented** (ships via `install.sh` + the NixOS module): native `Bash` is checked against agentd's ApprovalGate and every gated decision is appended to the ledger; writes to guardrail/secret paths require approval. It's unit-tested (40 gateway + 50 agentd tests green) but **live end-to-end verification on a running box is still pending** — until that's confirmed, keep running osModa on disposable/dedicated boxes, set provider spend limits, review the ledger, and treat "every mutation is approval-gated" as the *goal*, not yet a proven guarantee. See [SECURITY.md](docs/SECURITY.md) for what it does and how to verify.
 
 ### What NixOS rollback covers — and what it doesn't
 
@@ -252,7 +252,7 @@ A **PreToolUse enforcement hook** that routes the native tools through agentd's 
 
 ### What's planned but not yet complete
 
-- **Tier-0 tool-gate enforcement (PreToolUse hook)** — route the default agent's native `Bash`/`Write`/`Edit` through agentd's approval + audit ledger, so the blocklist and approval gate cover the path the agent actually uses (today they cover only the structured `shell_exec`/`file_write` tools). This is the top safety item.
+- **Tier-0 tool-gate enforcement (PreToolUse hook)** — *implemented; live verification pending.* Routes the default agent's native `Bash`/`Write`/`Edit` through agentd's approval + audit ledger so the blocklist and approval gate cover the path the agent actually uses (not just the structured `shell_exec`/`file_write` tools). Ships in `install.sh` + the NixOS module; see [SECURITY.md](docs/SECURITY.md).
 - **Tier 1/Tier 2 sandbox enforcement** — the trust tier model is designed and `sandbox_exec` exists, but bubblewrap isolation isn't fully wired for all third-party tools yet.
 - **Capability token auth** — `capability_mint` can create time-limited tokens, but socket authentication is still primarily file-permissions based.
 - **External security audit** — mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but hasn't had independent review.

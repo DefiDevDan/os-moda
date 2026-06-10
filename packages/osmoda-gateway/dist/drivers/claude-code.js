@@ -178,6 +178,16 @@ export const claudeCodeDriver = {
             "--strict-mcp-config",
             "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,mcp__osmoda__*",
         ];
+        // Tier-0 safety gate: if a PreToolUse approval-hook settings file is installed,
+        // point claude at it so the native Bash/Write/Edit tools route through agentd's
+        // ApprovalGate + hash-chained ledger (see hooks/pretooluse-approval.mjs) — the
+        // same policy that protects the structured shell_exec/file_write MCP tools.
+        // Opt-in via OSMODA_CLAUDE_SETTINGS (set by install.sh + the NixOS module);
+        // absent file → current behaviour, so this degrades gracefully.
+        const hookSettings = process.env.OSMODA_CLAUDE_SETTINGS;
+        if (hookSettings && fs.existsSync(hookSettings)) {
+            args.push("--settings", hookSettings);
+        }
         if (opts.sessionId)
             args.push("--resume", opts.sessionId);
         args.push("--", opts.message);

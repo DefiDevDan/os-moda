@@ -2,7 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
-    paths: ['packages/**', 'crates/**', 'scripts/**', '.github/workflows/ci.yml']
+    paths: ['packages/**', 'crates/**', 'scripts/**', 'nix/**', 'README.md', 'CLAUDE.md', '.github/workflows/ci.yml']
   pull_request:
 jobs:
   gateway:
@@ -17,18 +17,30 @@ jobs:
           npm install --no-audit --no-fund
           npx tsc --noEmit
           npx tsc
-          node --test test/
+          npm test   # node --test test/*.test.js — incl. the PreToolUse hook tests
 
   # NOTE: osmoda-integration-kit (@osmoda/sdk) is its OWN git repo, published
   # independently and intentionally NOT vendored here (see .gitignore). Its CI
   # lives in that repo; a job here would `cd` into a directory absent on a clean
   # checkout and fail. Re-add only if the kit is ever vendored back in.
+  # Likewise apps/spawn is gitignored (deployed via push.sh), so it has no job here.
 
-  agentd:
-    name: agentd (cargo check + test)
+  rust:
+    name: rust (workspace check + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check -p agentd
-      - run: cargo test -p agentd --bin agentd approval
+        with: { components: clippy }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+      - run: cargo test --workspace          # all 213 daemon tests (was: only agentd::approval)
+      - name: clippy (informational, non-blocking until the tree is clean)
+        run: cargo clippy --workspace || true
+
+  drift:
+    name: no-drift (defaults + counts agree)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-drift.sh

@@ -307,7 +307,7 @@ let
             }
           } catch (err) {
             spinner.style.display = 'none';
-            const msg = err.message || '';
+            const msg = err.message || "";
             if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
               error.textContent = 'Network error. Check your internet connection and try again.';
             } else {
@@ -362,7 +362,7 @@ let
       }
 
       if (req.method === 'POST' && req.url === '/setup/activate') {
-        let body = '';
+        let body = "";
         req.on('data', c => body += c);
         req.on('end', () => {
           let parsed;

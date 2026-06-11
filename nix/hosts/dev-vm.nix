@@ -94,4 +94,11 @@
   # --- Boot ---
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
+
+  # Placeholder filesystems so `system.build.toplevel` (and thus `nix flake check`)
+  # evaluates. The QEMU `.vm` build overrides these with its own mounts; they only
+  # matter if this config is ever installed to real hardware (then replace with
+  # values from nixos-generate-config).
+  fileSystems."/" = { device = "/dev/disk/by-label/nixos"; fsType = "ext4"; };
+  fileSystems."/boot" = { device = "/dev/disk/by-label/boot"; fsType = "vfat"; };
 }

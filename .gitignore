@@ -1,7 +1,9 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# NOTE: Cargo.lock is committed (cargo's recommendation for binary workspaces;
+# crane's cleanCargoSource needs it tracked). An ignore line here was a stale
+# no-op — the lock has been force-tracked all along — and just misled readers.
 
 # Node.js
 node_modules/

@@ -45,7 +45,9 @@
 
   # --- Networking (WiFi + Ethernet) ---
   networking.networkmanager.enable = true;
-  networking.wireless.enable = false; # NetworkManager handles WiFi
+  # NetworkManager handles WiFi. mkForce because the installer-CD base profile
+  # force-enables wpa_supplicant, which conflicts (caught by `nix flake check`).
+  networking.wireless.enable = lib.mkForce false;
 
   # --- Audio (PipeWire) ---
   security.rtkit.enable = true;

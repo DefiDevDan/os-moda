@@ -362,7 +362,7 @@ in {
     ] ++ optionals (cfg.gateway.enable && cfg.gateway.runtime == "openclaw") [
       pkgs.openclaw or pkgs.nodejs
     ] ++ optionals cfg.voice.enable [
-      pkgs.openai-whisper-cpp
+      pkgs.whisper-cpp
       pkgs.piper-tts
       pkgs.pipewire
     ] ++ optionals cfg.remoteAccess.cloudflare.enable [
@@ -704,7 +704,7 @@ in {
           "${pkgs.osmoda-voice}/bin/osmoda-voice"
           "--socket ${cfg.voice.socketPath}"
           "--data-dir ${cfg.stateDir}/voice"
-          "--whisper-bin ${pkgs.openai-whisper-cpp}/bin/whisper-cpp"
+          "--whisper-bin ${pkgs.whisper-cpp}/bin/whisper-cpp"
           "--whisper-model ${cfg.stateDir}/voice/models/${cfg.voice.whisperModel}"
           "--piper-bin ${pkgs.piper-tts}/bin/piper"
           "--piper-model ${cfg.stateDir}/voice/models/${cfg.voice.piperModel}"

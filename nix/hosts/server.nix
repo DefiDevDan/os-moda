@@ -48,4 +48,10 @@
 
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
+
+  # Placeholder filesystems so `system.build.toplevel` (and thus `nix flake check`)
+  # evaluates. On a real install, replace with the values nixos-generate-config
+  # emits for your disks (hardware-configuration.nix).
+  fileSystems."/" = { device = "/dev/disk/by-label/nixos"; fsType = "ext4"; };
+  fileSystems."/boot" = { device = "/dev/disk/by-label/boot"; fsType = "vfat"; };
 }

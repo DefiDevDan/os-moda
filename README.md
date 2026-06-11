@@ -8,10 +8,12 @@
 
 10 Rust daemons. 92 structured tools. **Modular agent runtime** — swap between Claude Code (default), OpenClaw, and a cloud managed-agent driver without SSH or rebuilds. **Persistent named chats** — multiple distinct conversations per server, each with its own session, transcript, and auto-compaction, plus cross-chat and cross-channel awareness. **Pre-indexed code knowledge graph** (CodeGraph) so the agent navigates codebases — including the OS's own source — without grep-spraying. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
-> **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
+> **v1.3.0 — Stable.** The core (10 daemons, the modular gateway, the agentd contracts + audit ledger, claude-code as the main runtime) is stable and deployed on real servers. Per-component maturity is tracked honestly in [STATUS.md](docs/STATUS.md); some advanced security hardening (live-verifying the tier-0 tool gate, fleet-wide trust) is still maturing — see the [Safety Model](#safety-model).
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Beta](https://img.shields.io/badge/Status-Public%20Beta-yellow.svg)]()
+[![Version](https://img.shields.io/badge/Version-v1.3.0-4f46e5.svg)]()
+[![Status](https://img.shields.io/badge/Status-Stable%20core-brightgreen.svg)]()
+[![Runtime](https://img.shields.io/badge/Runtime-Claude%20Code-orange.svg)]()
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-247-brightgreen.svg)]()
@@ -544,7 +546,7 @@ skills/                     19 system skill definitions
 
 ## Status
 
-> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 247 tests (213 Rust + 34 gateway), pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges — and the tier-0 agent's native tools aren't fully gated yet (see [Safety Model](#safety-model)). That's the price of being early to something new.
+> **v1.3.0 — stable core.** osModa is deployed on real servers managing real workloads — a working operating system with 247 tests (213 Rust + 34 gateway), pen-tested security, and months of development. The architecture, the agentd contracts, the event/streaming contract, and **Claude Code as the main runtime** are stable; you can build on them. What's still maturing is advanced security hardening (live-verifying the tier-0 tool gate, fleet-wide trust) and the company-integration layer — tracked honestly per component in [STATUS.md](docs/STATUS.md). This is a real 1.x, not a finished 1.0-forever — features still ship fast.
 
 **The numbers:**
 - 10 Rust crates (10 daemons + 1 CLI)
@@ -604,7 +606,7 @@ Payment via Coinbase x402 protocol (USDC on Base or Solana). Full API docs at [`
 
 ## Contributing
 
-Public beta. Feedback, bug reports, and PRs welcome.
+v1.3.0, actively developed. Feedback, bug reports, and PRs welcome.
 
 - **Good first issues** — see the [good-first-issue label](https://github.com/bolivian-peru/os-moda/labels/good%20first%20issue) for scoped 30-90 min tasks
 - **Bug reports** — open an issue, include logs (`journalctl -u osmoda-gateway --since '10 min ago'`)

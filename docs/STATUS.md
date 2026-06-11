@@ -2,7 +2,22 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-06-01
+Last updated: 2026-06-11 · **v1.3.0 — stable core**
+
+## v1.3.0 — stable core (2026-06-11)
+
+First **stable** release. What "stable" means here: the architecture, the 10-daemon model, the
+agentd contracts + hash-chained ledger, the event/streaming contract, and **Claude Code as the
+main runtime** are stable and safe to build on. It does **not** mean every hardening item is
+done — see "still maturing" below.
+
+| Area | Status |
+|---|---|
+| **Main runtime = Claude Code** | Canonical default across install.sh / osmoda.nix / README / CLAUDE.md (a CI drift-gate enforces the agreement). OpenClaw is a fully-supported peer; managed-agent is a prototype. |
+| **Tier-0 PreToolUse approval hook** | **Implemented + unit-tested, live end-to-end verification pending.** Routes the agent's native Bash/Write/Edit through agentd's ApprovalGate + ledger. Ships in install.sh + the NixOS module. Until verified on a running box, treat as "shipped, not yet field-proven" (do not market as "enforced"). |
+| **CI** | Full `cargo test --workspace` (213) + gateway `npm test` (34) + a no-drift gate. |
+| **Data durability (hosted control plane)** | Atomic encrypted-store writes + `.bak` fallback (fixed a silent total-data-loss class). |
+| **Still maturing** | Live-verify the tool gate; fleet-wide trust (per-box SSH keys, egress confinement, spend kill-switch); the company-knowledge/connector layer; multi-org control plane (SSO/RBAC/Postgres). These are the path from "stable core" to "enterprise-ready." |
 
 ## Named chats + cross-chat awareness (2026-06-01 · gateway v0.3.0)
 

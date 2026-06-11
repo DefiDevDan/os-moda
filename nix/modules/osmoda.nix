@@ -223,7 +223,7 @@ in {
 
     # --- Custom UI ---
     ui = {
-      enable = mkOption { type = types.bool; default = true; description = "Enable osModa custom chat UI (fronts the OpenClaw gateway)"; };
+      enable = mkOption { type = types.bool; default = true; description = "Enable osModa custom chat UI (fronts the osModa gateway)"; };
     };
 
     # --- Remote Access ---

@@ -113,7 +113,7 @@ Instead of logging in and adding a credential afterwards, you can pass everythin
 # Bring your Claude Pro subscription — flat $20/mo, near-unlimited usage
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
   --runtime claude-code \
-  --default-model claude-opus-4-6 \
+  --default-model claude-opus-4-8 \
   --credential "My Claude Pro|anthropic|oauth|$(printf 'sk-ant-oat01-…' | base64)"
 
 # Or a pay-per-token API key
@@ -132,7 +132,7 @@ Flags:
 | Flag | Values | Notes |
 |---|---|---|
 | `--runtime` | `claude-code` (default) / `openclaw` | Initial per-agent runtime. Changeable later from the dashboard without re-running this. |
-| `--default-model` | e.g. `claude-opus-4-6`, `claude-sonnet-4-6` | Initial default for the osmoda agent. |
+| `--default-model` | e.g. `claude-opus-4-8`, `claude-sonnet-4-6` | Initial default for the osmoda agent. |
 | `--credential` | `label\|provider\|type\|base64-secret` | Repeatable. `provider` ∈ {anthropic, openai, openrouter, deepseek}; `type` ∈ {oauth, api_key}. |
 | `--api-key` | raw or base64 key | Legacy one-liner; auto-promotes to a credential. |
 
@@ -204,7 +204,7 @@ The gateway reads `/var/lib/osmoda/config/agents.json` at startup and on `SIGHUP
 ```bash
 curl -X PATCH -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)" \
   -H "Content-Type: application/json" \
-  -d '{"runtime":"openclaw","model":"claude-opus-4-6"}' \
+  -d '{"runtime":"openclaw","model":"claude-opus-4-8"}' \
   http://127.0.0.1:18789/config/agents/osmoda
 systemctl reload osmoda-gateway   # SIGHUP — in-flight sessions keep running
 ```

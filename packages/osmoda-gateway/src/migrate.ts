@@ -186,7 +186,7 @@ export function runMigrationIfNeeded(): MigrationReport {
     mkAgent(
       "osmoda",
       "osModa (full access)",
-      "claude-opus-4-6",
+      "claude-opus-4-8",
       ["web", "api"],
       runtimeDetected,
       openClawCredByAgent["osmoda"] || defaultCredId,

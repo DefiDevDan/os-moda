@@ -126,7 +126,7 @@ export const openClawDriver: RuntimeDriver = {
   // token authenticated through `openclaw agent --local` (only blocked by the
   // subscription's usage cap, not by auth). So both api_key and oauth work.
   supportedAuthTypes: ["api_key", "oauth"],
-  defaultModels: ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "gpt-5"],
+  defaultModels: ["claude-opus-4-8", "claude-fable-5", "claude-opus-4-7", "claude-sonnet-4-6", "gpt-5"],
 
   async healthCheck(): Promise<DriverHealthResult> {
     // Probe the openclaw binary AND verify the CLI shape this driver depends on.

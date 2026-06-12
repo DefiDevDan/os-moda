@@ -66,7 +66,12 @@ export const claudeCodeDriver: RuntimeDriver = {
     "Anthropic's official Claude CLI in headless streaming mode. Works with a Claude Pro OAuth subscription or pay-per-token API key.",
   supportedProviders: ["anthropic"],
   supportedAuthTypes: ["oauth", "api_key"],
-  defaultModels: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  // Recommended default first. claude-opus-4-8 is the most capable Opus-tier
+  // model (1M context); claude-fable-5 is Anthropic's most capable model overall
+  // (note: requires 30-day data retention, not available under ZDR). Bare IDs —
+  // claude-code wants the un-prefixed form. claude-mythos-5 (Project Glasswing
+  // only) is also accepted if you type it.
+  defaultModels: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
 
   async healthCheck(): Promise<DriverHealthResult> {
     // Probe `claude --version`. The 2.x CLI prints e.g. "2.1.118 (Claude Code)"

@@ -128,7 +128,7 @@ while [[ $# -gt 0 ]]; do
       echo "                          label|provider|type|base64-secret"
       echo "                        provider ∈ {anthropic, openai, openrouter}"
       echo "                        type     ∈ {oauth, api_key}"
-      echo "  --default-model NAME  Initial default model (e.g. claude-opus-4-6)"
+      echo "  --default-model NAME  Initial default model (e.g. claude-opus-4-8)"
       echo "  --runtime NAME        Agent driver: claude-code (default; multi-chat + streaming + OAuth) or openclaw (BYOK plugins; API key)"
       echo "  --advanced-openclaw-native  Bypass osmoda-gateway → OpenClaw's own gateway. Disables named chats/transcript. Advanced/self-host only."
       echo "  --branch NAME         Git branch to install (default: main)"
@@ -734,7 +734,7 @@ if [ ! -x "$CLAUDE_BIN" ]; then
   # optionalDependencies may skip on platform-incompatible installs; force-install
   # explicitly within the same pinned range rather than @latest.
   warn "Claude Code CLI missing after npm install — forcing install within pinned range"
-  npm install --no-audit --no-fund --no-save '@anthropic-ai/claude-code@^2.1.75' 2>&1 | tail -3 || warn "Claude Code CLI install failed"
+  npm install --no-audit --no-fund --no-save '@anthropic-ai/claude-code@^2.1.175' 2>&1 | tail -3 || warn "Claude Code CLI install failed"
 fi
 if [ -x "$CLAUDE_BIN" ]; then
   ln -sf "$CLAUDE_BIN" /usr/local/bin/claude 2>/dev/null || true
@@ -1105,7 +1105,7 @@ const config = {
   port: 18789,
   authToken: gwToken,
   agents: [
-    { id: 'osmoda', model: 'claude-opus-4-6', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
+    { id: 'osmoda', model: 'claude-opus-4-8', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
     { id: 'mobile', model: 'claude-sonnet-4-6', systemPromptFile: '/var/lib/osmoda/workspace-mobile/SOUL.md' }
   ],
   bindings: [
@@ -1197,7 +1197,7 @@ fs.mkdirSync(CFG, { recursive: true, mode: 0o700 });
 const apiKey = process.env.OSMODA_INSTALL_API_KEY || "";
 const provider = process.env.OSMODA_INSTALL_PROVIDER || "anthropic";
 const runtime = process.env.OSMODA_INSTALL_RUNTIME || "claude-code";
-const defaultModel = process.env.OSMODA_INSTALL_DEFAULT_MODEL || "claude-opus-4-6";
+const defaultModel = process.env.OSMODA_INSTALL_DEFAULT_MODEL || "claude-opus-4-8";
 const credSpecs = JSON.parse(process.env.OSMODA_INSTALL_CREDENTIALS || "[]");
 
 const creds = [];
@@ -1258,7 +1258,7 @@ const mkAgent = (id, displayName, model, channels) => ({
 });
 
 const agents = [
-  mkAgent("osmoda", "osModa (full access)", defaultModel || "claude-opus-4-6", ["web", "api"]),
+  mkAgent("osmoda", "osModa (full access)", defaultModel || "claude-opus-4-8", ["web", "api"]),
   mkAgent("mobile", "osModa mobile", "claude-sonnet-4-6", ["telegram", "whatsapp"]),
 ];
 
@@ -1311,7 +1311,7 @@ const config = {
         name: 'osModa',
         workspace: '/root/.openclaw/workspace-osmoda',
         agentDir: '/root/.openclaw/agents/osmoda/agent',
-        model: 'anthropic/claude-opus-4-6'
+        model: 'anthropic/claude-opus-4-8'
       },
       {
         id: 'mobile',
@@ -1364,7 +1364,7 @@ const config = {
   port: 18789,
   authToken: gwToken,
   agents: [
-    { id: 'osmoda', model: 'claude-opus-4-6', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
+    { id: 'osmoda', model: 'claude-opus-4-8', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
     { id: 'mobile', model: 'claude-sonnet-4-6', systemPromptFile: '/var/lib/osmoda/workspace-mobile/SOUL.md' }
   ],
   bindings: [
@@ -1391,7 +1391,7 @@ const config = {
   agents: {
     defaults: { compaction: { mode: 'safeguard' } },
     list: [
-      { id: 'osmoda', default: true, name: 'osModa', workspace: '/root/.openclaw/workspace-osmoda', agentDir: '/root/.openclaw/agents/osmoda/agent', model: 'anthropic/claude-opus-4-6' },
+      { id: 'osmoda', default: true, name: 'osModa', workspace: '/root/.openclaw/workspace-osmoda', agentDir: '/root/.openclaw/agents/osmoda/agent', model: 'anthropic/claude-opus-4-8' },
       { id: 'mobile', name: 'osModa Mobile', workspace: '/root/.openclaw/workspace-mobile', agentDir: '/root/.openclaw/agents/mobile/agent', model: 'anthropic/claude-sonnet-4-6' }
     ]
   },
@@ -2691,7 +2691,7 @@ try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch(e) { con
 // Create fresh config if missing
 if (!config) {
   var auth = t ? {mode:'token',token:t} : {mode:'none'};
-  config = {gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{defaults:{compaction:{mode:'safeguard'}},list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+  config = {gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{defaults:{compaction:{mode:'safeguard'}},list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-8'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
 }
 // Always set compaction safeguard
 if (!config.agents) config.agents = {};
@@ -2795,7 +2795,7 @@ var fs=require('fs'),ch=process.argv[2],tf=process.argv[3],au=process.argv[4]||'
 var configPath='/root/.openclaw/openclaw.json';
 var config;
 try { config=JSON.parse(fs.readFileSync(configPath,'utf8')); } catch(e) {
-  config={gateway:{mode:'local',auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+  config={gateway:{mode:'local',auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-8'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
 }
 if(!config.channels)config.channels={};
 var allowList=au?au.split(',').filter(function(u){return /^\d+$/.test(u)}):[];

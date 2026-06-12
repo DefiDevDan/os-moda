@@ -91,8 +91,8 @@ in {
       runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "claude-code"; description = "Agent runtime: claude-code (default — token streaming + persistent named chats + cross-chat awareness, OAuth subscription or API key) or openclaw (BYOK multi-provider runtime that loads the 92-tool osmoda-bridge plugin; API key only). Switchable per-agent at runtime from the dashboard (no rebuild). Matches install.sh's default."; };
       port = mkOption { type = types.port; default = 18789; description = "Gateway port (user-facing)"; };
       internalPort = mkOption { type = types.port; default = 18790; description = "Internal gateway port (used when osModa UI fronts it)"; };
-      model = mkOption { type = types.str; default = "anthropic/claude-opus-4-6"; description = "Default LLM model (main agent)"; };
-      mobileModel = mkOption { type = types.str; default = "anthropic/claude-sonnet-4-6"; description = "Mobile agent model"; };
+      model = mkOption { type = types.str; default = "anthropic/claude-opus-4-8"; description = "Default LLM model (main agent). claude-opus-4-8 = most capable Opus (1M context). Also supported: claude-fable-5 (most capable overall; needs 30-day data retention), claude-mythos-5 (Project Glasswing), claude-sonnet-4-6, claude-haiku-4-5. The openclaw driver prefixes the provider automatically; claude-code uses the bare id."; };
+      mobileModel = mkOption { type = types.str; default = "anthropic/claude-sonnet-4-6"; description = "Mobile agent model (Sonnet 4.6 — fast + concise)"; };
       configFile = mkOption { type = types.nullOr types.path; default = null; description = "Gateway config file (JSON)"; };
     };
     # Backward compat: openclaw options mirror gateway options

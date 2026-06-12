@@ -217,6 +217,26 @@ export async function handleConfigRequest(req, res, url, deps) {
             ok(res, deps.cache.current());
             return true;
         }
+        // V1 spend meter read surface: today's per-agent usage vs caps. Lets the
+        // dashboard render a budget bar and an operator confirm an agent isn't
+        // silently capped. Read-only; safe to poll.
+        if (url.pathname === "/config/spend" && req.method === "GET") {
+            const agents = deps.cache.current().agents;
+            const report = agents.map((a) => {
+                const s = deps.spendCheck ? deps.spendCheck(a) : null;
+                return {
+                    id: a.id,
+                    dailyTokenCap: a.dailyTokenCap ?? null,
+                    dailyUsdCap: a.dailyUsdCap ?? null,
+                    tokensUsed: s?.tokensUsed ?? 0,
+                    usdUsed: s ? Math.round(s.usdUsed * 100) / 100 : 0,
+                    pct: s ? Math.round(s.pct * 100) : 0,
+                    allowed: s ? s.allowed : true,
+                };
+            });
+            ok(res, { day: new Date().toISOString().slice(0, 10), agents: report });
+            return true;
+        }
         if (url.pathname === "/config/agents" && req.method === "PUT") {
             const body = await readJson(req);
             if (!Array.isArray(body.agents))
@@ -257,6 +277,12 @@ export async function handleConfigRequest(req, res, url, deps) {
                 if (a.system_prompt_file && !isAllowedProfilePath(a.system_prompt_file)) {
                     return err(res, 400, "validation_failed", `system_prompt_file must be under /var/lib/osmoda/ (agent ${a.id})`), true;
                 }
+                for (const capKey of ["dailyTokenCap", "dailyUsdCap"]) {
+                    const v = a[capKey];
+                    if (v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) {
+                        return err(res, 400, "validation_failed", `${capKey} must be a non-negative number (agent ${a.id})`), true;
+                    }
+                }
             }
             const now = new Date().toISOString();
             const normalized = body.agents.map((a) => ({
@@ -291,6 +317,15 @@ export async function handleConfigRequest(req, res, url, deps) {
                 && !isAllowedProfilePath(body.system_prompt_file)) {
                 return err(res, 400, "validation_failed", "system_prompt_file must be under /var/lib/osmoda/"), true;
             }
+            // Daily spend caps (V1 kill-switch): must be a finite, non-negative number
+            // (0/null = unlimited). Reject NaN/strings/negatives so a typo can't
+            // silently disable the cap or set a nonsense ceiling.
+            for (const capKey of ["dailyTokenCap", "dailyUsdCap"]) {
+                if (capKey in body && body[capKey] != null
+                    && (typeof body[capKey] !== "number" || !Number.isFinite(body[capKey]) || body[capKey] < 0)) {
+                    return err(res, 400, "validation_failed", `${capKey} must be a non-negative number (0 or null = unlimited)`), true;
+                }
+            }
             // Pre-flight: if the caller is changing runtime, probe the target driver
             // first. Caught the 2026-05-14 openclaw incident where the driver assumed
             // an old CLI shape and every chat after the swap died with `agent_error`.
@@ -311,7 +346,7 @@ export async function handleConfigRequest(req, res, url, deps) {
                     return err(res, 422, "driver_unavailable", `Cannot switch agent '${id}' to runtime '${body.runtime}': ${health.error || "driver unhealthy"}`, { runtime: body.runtime, health }), true;
                 }
             }
-            for (const k of ["runtime", "credential_id", "model", "display_name", "enabled", "channels", "profile_dir", "system_prompt_file"]) {
+            for (const k of ["runtime", "credential_id", "model", "display_name", "enabled", "channels", "profile_dir", "system_prompt_file", "dailyTokenCap", "dailyUsdCap"]) {
                 if (k in body)
                     agent[k] = body[k];
             }

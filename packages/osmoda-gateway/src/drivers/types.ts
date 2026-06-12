@@ -39,6 +39,15 @@ export interface AgentProfile {
   system_prompt_file?: string;
   enabled: boolean;
   updated_at: string;
+  /**
+   * Optional per-agent daily spend caps (V1 — the unattended-loop safety floor).
+   * Once the agent's same-UTC-day usage reaches a cap, the next turn is refused
+   * with a typed `spend_cap_exceeded` error BEFORE the model is invoked. A
+   * `0`/undefined cap means unlimited (the historical behaviour). A looping
+   * agent on the customer's key MUST have at least one of these set.
+   */
+  dailyTokenCap?: number;   // total input+output tokens per UTC day
+  dailyUsdCap?: number;     // estimated USD per UTC day
 }
 
 /**
@@ -82,6 +91,12 @@ export interface AgentEvent {
   round?: number;
   sessionId?: string;
   code?: string;
+  /**
+   * For the terminal `done` event: token usage + estimated USD cost for this
+   * turn. Drives the per-agent spend meter (V1). Absent when the runtime
+   * doesn't report usage; the meter then falls back to a coarse estimate.
+   */
+  usage?: { input_tokens?: number; output_tokens?: number; cost_usd?: number };
 }
 
 export interface DriverSessionOpts {

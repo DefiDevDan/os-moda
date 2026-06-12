@@ -153,7 +153,7 @@ Tests: 27 gateway tests green (chats 8, cross-chat 3, claude-code 2, openclaw 11
 | System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 | Spawn API version | 1.3.1 (latest documented; spawn-app internal at v1.3.35) |
-| osmoda-gateway version | 0.2.4 |
+| osmoda-gateway version | 1.3.0 |
 
 ---
 
@@ -350,9 +350,11 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **90 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **92 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (90 total)
+### Tool breakdown (92 total)
+
+The authoritative, exhaustive tool list lives in [`CLAUDE.md`](../CLAUDE.md) (osmoda-bridge section); this table is a categorized summary.
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -361,7 +363,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | systemd | 2 | service_status, journal_logs |
 | network | 1 | network_info |
 | wallet (keyd) | 7 | wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt, wallet_build_tx |
-| switch (watch) | 4 | safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback |
+| switch (watch) | 5 | safe_switch_begin, safe_switch_list, safe_switch_status, safe_switch_commit, safe_switch_rollback |
 | watcher (watch) | 2 | watcher_add, watcher_list |
 | fleet (watch) | 4 | fleet_propose, fleet_status, fleet_vote, fleet_rollback |
 | routine (routines) | 3 | routine_add, routine_list, routine_trigger |
@@ -542,7 +544,7 @@ token lifecycle, WS hardening.
 | Token lifecycle | **Solid** | `tokens.enc` AES-256-GCM store; 1-year default TTL; lazy metadata for legacy tokens |
 | Per-token rate limits | **Solid** | spawn 10/h, status 120/min, chat 3 concurrent - all with `Retry-After` on 429 |
 | `@osmoda/client` TypeScript SDK | **Functional** | `packages/osmoda-client/` - handwritten to match `/api/v1/docs`; typechecks clean |
-| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 90 tools |
+| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 92 tools |
 
 ### Heartbeat Pipeline
 

@@ -157,7 +157,7 @@ export function runMigrationIfNeeded() {
         updated_at: now,
     });
     // osmoda: full-access web agent on Opus.
-    newAgents.push(mkAgent("osmoda", "osModa (full access)", "claude-opus-4-6", ["web", "api"], runtimeDetected, openClawCredByAgent["osmoda"] || defaultCredId));
+    newAgents.push(mkAgent("osmoda", "osModa (full access)", "claude-opus-4-8", ["web", "api"], runtimeDetected, openClawCredByAgent["osmoda"] || defaultCredId));
     // mobile: concise, Sonnet, Telegram/WhatsApp.
     newAgents.push(mkAgent("mobile", "osModa mobile", "claude-sonnet-4-6", ["telegram", "whatsapp"], runtimeDetected, openClawCredByAgent["mobile"] || defaultCredId));
     const file = {

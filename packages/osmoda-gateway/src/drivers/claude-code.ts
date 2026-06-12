@@ -300,6 +300,7 @@ export const claudeCodeDriver: RuntimeDriver = {
     const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
     let sessionId: string | undefined;
     let sessionYielded = false;
+    let turnUsage: AgentEvent["usage"] | undefined; // filled from the terminal `result` event (spend meter)
     // De-dup text deltas PER assistant message. claude-code emits one assistant
     // message before each tool call and another after — each with its own text
     // block that starts at offset 0. A single session-wide counter sliced the
@@ -413,6 +414,17 @@ export const claudeCodeDriver: RuntimeDriver = {
             }
           }
           sessionId = event.session_id || sessionId;
+          // Capture token usage + cost for the spend meter. The 2.x CLI reports
+          // `usage` (input/output/cache tokens) and `total_cost_usd` on the
+          // terminal result event.
+          const u = event.usage;
+          if (u || typeof event.total_cost_usd === "number") {
+            turnUsage = {
+              input_tokens: (u?.input_tokens || 0) + (u?.cache_read_input_tokens || 0) + (u?.cache_creation_input_tokens || 0),
+              output_tokens: u?.output_tokens || 0,
+              cost_usd: typeof event.total_cost_usd === "number" ? event.total_cost_usd : undefined,
+            };
+          }
         }
       }
     } catch {
@@ -448,7 +460,7 @@ export const claudeCodeDriver: RuntimeDriver = {
       yield { type: "error", text: errMsg };
     }
 
-    yield { type: "done", sessionId };
+    yield { type: "done", sessionId, usage: turnUsage };
   },
 };
 

@@ -37,7 +37,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **osmoda-gateway** (TypeScript, **v0.2.1**) - **Modular agent gateway**. HTTP+WS server on 127.0.0.1:18789
+2. **osmoda-gateway** (TypeScript, **v1.3.0**) - **Modular agent gateway**. HTTP+WS server on 127.0.0.1:18789
    (binds to localhost; public reach is via the spawn-server SSH proxy). Always the systemd unit.
    Routes per-agent to a pluggable runtime driver:
    - `claude-code` driver - wraps `claude` CLI (OAuth or API key). **LOCAL** execution (root on this box) — the tier-0 system agent.
@@ -70,6 +70,29 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    2026.5.7 renamed `run` → `agent`; chat after a swap died with a bare
    `agent_error`. Since 2026-05-21 the openclaw driver is fully ported to that
    CLI, so the swap now succeeds instead of being blocked.
+
+   **Autonomy + spend safety (V1/V2 — `src/spend.ts`, `src/agent-loop.ts`).**
+   The gateway now has the floor that makes unattended operation safe and the
+   engine that makes it autonomous:
+   - **Spend kill-switch** (`SpendMeter`): per-agent, per-UTC-day token + USD
+     accumulation, persisted at `state/spend.json`. Every turn (web + Telegram +
+     loop + `/agent/turn`) is gated by `spend.check()` BEFORE the model is
+     invoked — over-cap refuses with a typed `spend_cap_exceeded`; `spend.record()`
+     bills the terminal `done` event's `usage` (claude-code reports real
+     `total_cost_usd`; openclaw falls back to a price-table estimate). Alerts at
+     80%/100% (log + Telegram). Caps are set per-agent via `dailyTokenCap` /
+     `dailyUsdCap` (PATCH `/config/agents/{id}`); `GET /config/spend` surfaces
+     today's usage. `0`/undefined = unlimited (legacy behaviour).
+   - **Agent loop engine** (`LoopManager` + `runAgentTurn`): fires real LLM turns
+     toward a standing GOAL on a cadence until a stop-sentinel, an iteration cap,
+     or the spend gate halts it. A loop IS a named chat (own `sessionKey`,
+     `--resume` continuity, canonical transcript, cross-chat visibility). Persisted
+     at `state/loops.json`; `resumeAll()` reschedules running loops on cadence
+     after a restart (never all at once). Spend-capped ticks skip + auto-resume at
+     UTC reset; 3 consecutive errors pause the loop. HTTP: `POST /agent/turn`
+     (one-shot turn injection — the surface routines/cron/external triggers use),
+     `POST /loops` (create+start), `GET /loops`, `GET /loops/:id`,
+     `POST /loops/:id/{stop,pause,resume}`. Unit-tested (12 loop + 7 spend cases).
 
 2b. **osmoda-bridge** (TypeScript) - OpenClaw plugin (BYOK runtime, peer to claude-code). Registers tools via
    `api.registerTool()` factory pattern (92 tools): system_health, system_query,
@@ -136,7 +159,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
    file-manager, network-manager, service-explorer, app-deployer, deploy-ai-agent,
-   swarm-predict, scaled-swarm-predict.
+   swarm-predict, scaled-swarm-predict, spec-driven-development.
 
 12. **NixOS module** (osmoda.nix) - single module that wires everything as systemd services.
    Generates gateway config from NixOS options (agents, bindings, channels).

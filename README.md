@@ -132,7 +132,7 @@ Flags:
 | Flag | Values | Notes |
 |---|---|---|
 | `--runtime` | `claude-code` (default) / `openclaw` | Initial per-agent runtime. Changeable later from the dashboard without re-running this. |
-| `--default-model` | e.g. `claude-opus-4-8`, `claude-sonnet-4-6` | Initial default for the osmoda agent. |
+| `--default-model` | e.g. `claude-opus-4-8` (default), `claude-fable-5`, `claude-mythos-5`, `claude-sonnet-4-6` | Initial default for the osmoda agent. `claude-fable-5` is Anthropic's most capable model; `claude-mythos-5` is the Project Glasswing variant. |
 | `--credential` | `label\|provider\|type\|base64-secret` | Repeatable. `provider` ∈ {anthropic, openai, openrouter, deepseek}; `type` ∈ {oauth, api_key}. |
 | `--api-key` | raw or base64 key | Legacy one-liner; auto-promotes to a credential. |
 
@@ -214,6 +214,12 @@ Or, from the spawn.os.moda dashboard, open a server → **Engine** tab → pick 
 Credentials are encrypted at rest in `credentials.json.enc` (AES-256-GCM). Secrets never leave the gateway; the REST API returns a preview prefix only. `POST /config/credentials/:id/test` does a 1-token probe against the provider so you can validate before assigning.
 
 The agent is tier 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials. Lower tiers cannot escalate privileges upward by design. Tier 0 remains the trusted computing base and must be governed by approval policies, spending limits, and audit review.
+
+### Autonomy — runs itself, on a budget
+
+The agent doesn't only answer when spoken to. Give it a **goal and a cadence** and it works on its own: `POST /loops` starts a loop (interval + iteration cap + stop-sentinel) that fires a real turn each tick toward the goal, persists across restarts, and pauses itself after repeated errors. `POST /agent/turn` injects a single turn — the surface cron/routines/external triggers use. Each loop is a named chat, so its progress shows up in the dashboard like any other conversation.
+
+What makes unattended operation safe is a **per-agent daily spend kill-switch**: set `dailyTokenCap` / `dailyUsdCap` and every turn — interactive or autonomous — is checked *before* the model is invoked. Over the cap it's refused with a typed `spend_cap_exceeded`; the meter resets at 00:00 UTC and alerts at 80% / 100%. An unattended loop can never outrun its budget.
 
 ---
 

@@ -57,7 +57,12 @@ export const claudeCodeDriver = {
     description: "Anthropic's official Claude CLI in headless streaming mode. Works with a Claude Pro OAuth subscription or pay-per-token API key.",
     supportedProviders: ["anthropic"],
     supportedAuthTypes: ["oauth", "api_key"],
-    defaultModels: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    // Recommended default first. claude-opus-4-8 is the most capable Opus-tier
+    // model (1M context); claude-fable-5 is Anthropic's most capable model overall
+    // (note: requires 30-day data retention, not available under ZDR). Bare IDs —
+    // claude-code wants the un-prefixed form. claude-mythos-5 (Project Glasswing
+    // only) is also accepted if you type it.
+    defaultModels: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
     async healthCheck() {
         // Probe `claude --version`. The 2.x CLI prints e.g. "2.1.118 (Claude Code)"
         // to stdout. Anything else (missing binary, wrong version string) means
@@ -291,6 +296,7 @@ export const claudeCodeDriver = {
         const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
         let sessionId;
         let sessionYielded = false;
+        let turnUsage; // filled from the terminal `result` event (spend meter)
         // De-dup text deltas PER assistant message. claude-code emits one assistant
         // message before each tool call and another after — each with its own text
         // block that starts at offset 0. A single session-wide counter sliced the
@@ -414,6 +420,17 @@ export const claudeCodeDriver = {
                         }
                     }
                     sessionId = event.session_id || sessionId;
+                    // Capture token usage + cost for the spend meter. The 2.x CLI reports
+                    // `usage` (input/output/cache tokens) and `total_cost_usd` on the
+                    // terminal result event.
+                    const u = event.usage;
+                    if (u || typeof event.total_cost_usd === "number") {
+                        turnUsage = {
+                            input_tokens: (u?.input_tokens || 0) + (u?.cache_read_input_tokens || 0) + (u?.cache_creation_input_tokens || 0),
+                            output_tokens: u?.output_tokens || 0,
+                            cost_usd: typeof event.total_cost_usd === "number" ? event.total_cost_usd : undefined,
+                        };
+                    }
                 }
             }
         }
@@ -451,7 +468,7 @@ export const claudeCodeDriver = {
             const errMsg = stderrText.trim().split("\n").pop() || `claude exited with code ${exitCode}`;
             yield { type: "error", text: errMsg };
         }
-        yield { type: "done", sessionId };
+        yield { type: "done", sessionId, usage: turnUsage };
     },
 };
 /**

@@ -335,7 +335,7 @@ the `openclaw` driver instead of the `claude-code` driver for that agent's next 
 - `/var/lib/osmoda/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
 - `/var/lib/osmoda/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool access:** Both agents have full access to all 90 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
+**Tool access:** Both agents have full access to all 92 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
@@ -523,7 +523,7 @@ Agents can spawn osModa servers programmatically — agents spawning agents.
 
 **Auth:** API tokens (`osk_...`) are cryptographically random (32 bytes), returned once at spawn. Stored server-side as SHA-256 hash, compared with timing-safe equality. Bearer token auth for status + WebSocket chat.
 
-**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 90 tools, mesh networking, self-install fallback.
+**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 92 tools, mesh networking, self-install fallback.
 
 ## Safety Boundaries
 

@@ -33,6 +33,8 @@ import { buildCrossChatDigest } from "./cross-chat.js";
 import { loadDurableMemory } from "./memory.js";
 import { ConfigCache } from "./config.js";
 import { runMigrationIfNeeded } from "./migrate.js";
+import { SpendMeter } from "./spend.js";
+import { LoopManager, runAgentTurn } from "./agent-loop.js";
 import {
   getCredential, loadCredentials,
   markCredentialCooldown, pickFallbackCredential, classifyCredentialError,
@@ -166,6 +168,61 @@ const sessions = new SessionStore();
 const transcripts = new TranscriptStore();
 const chats = new ChatRegistry();
 
+// V1 spend kill-switch: per-agent, per-UTC-day token + USD meter. Persisted
+// next to sessions.json so today's tally survives a gateway restart (otherwise
+// a crash-loop could reset the budget and let an over-cap loop keep burning).
+// The alert sink logs at warn (80%) / halt (100%) and DMs Telegram if wired —
+// so the operator hears about a runaway loop without watching the dashboard.
+const SPEND_PATH =
+  process.env.OSMODA_SPEND_PATH ||
+  (process.env.OSMODA_CONFIG_DIR
+    ? path.join(process.env.OSMODA_CONFIG_DIR, "..", "state", "spend.json")
+    : "/var/lib/osmoda/state/spend.json");
+const spend = new SpendMeter({
+  file: SPEND_PATH,
+  alert: (agentId, level, info) => {
+    const pct = Math.round(info.pct * 100);
+    const line =
+      level === "halt"
+        ? `🛑 Agent "${agentId}" hit its daily spend cap (${pct}% · $${info.usdUsed.toFixed(2)} · ${info.tokensUsed.toLocaleString()} tokens). Further turns are refused until 00:00 UTC.`
+        : `⚠️ Agent "${agentId}" is at ${pct}% of its daily spend cap ($${info.usdUsed.toFixed(2)} · ${info.tokensUsed.toLocaleString()} tokens).`;
+    console.warn(`[spend] ${line}`);
+    if (env.telegramBotToken) {
+      for (const u of env.telegramAllowedUsers) {
+        sendTelegram(env.telegramBotToken, u, line).catch(() => {});
+      }
+    }
+  },
+});
+
+// V2 agent loop engine: the autonomy scheduler. A loop is a named chat the
+// gateway drives on a cadence toward a goal, gated by the V1 spend meter every
+// tick. Persisted next to sessions.json so loops survive a restart (rescheduled
+// on cadence, never re-fired all at once — see resumeAll()).
+const LOOPS_PATH =
+  process.env.OSMODA_LOOPS_PATH ||
+  (process.env.OSMODA_CONFIG_DIR
+    ? path.join(process.env.OSMODA_CONFIG_DIR, "..", "state", "loops.json")
+    : "/var/lib/osmoda/state/loops.json");
+const loops = new LoopManager({
+  getAgent: (id) => cache.findAgent(id),
+  getCredential: (id) => getCredential(id) ?? undefined,
+  getDriver: (n) => getDriver(n) ?? undefined,
+  loadSystemPrompt: (agent) => loadSystemPrompt(agent),
+  mcpConfigPath: getMcpConfigPath(env.mcpBridgePath),
+  spendCheck: (a) => spend.check(a),
+  spendRecord: (a, u) => spend.record(a, u),
+  getSessionId: (key, agentId, runtime) => sessions.getOrCreate(key, "loop", agentId, runtime).claudeSessionId,
+  saveSessionId: (key, sid, runtime) => sessions.updateClaudeSession(key, "loop", sid, runtime),
+  appendTranscript: (agentId, key, row) => transcripts.append(agentId, key, row),
+  registerChat: (key, opts) => chats.register(key, opts),
+  file: LOOPS_PATH,
+  log: (m) => console.log(m),
+});
+// Reschedule persisted running loops AFTER the box has settled (on cadence, not
+// at t=0) so a reboot doesn't fire every loop simultaneously.
+loops.resumeAll();
+
 // Prune expired sessions every 5 minutes.
 setInterval(() => sessions.prune(), 5 * 60 * 1000);
 
@@ -185,13 +242,22 @@ function reloadSelf(): void {
   try { process.kill(process.pid, "SIGHUP"); } catch { /* ignore */ }
 }
 
+// Graceful shutdown: cancel loop timers + abort in-flight loop turns so a
+// restart doesn't leave an orphaned claude process burning the credential.
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    try { loops.shutdown(); } catch { /* best-effort */ }
+    process.exit(0);
+  });
+}
+
 // ── HTTP server ─────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${env.port}`);
 
   // Config API — may handle + respond.
-  if (await handleConfigRequest(req, res, url, { cache, authToken: env.authToken, reloadSelf })) {
+  if (await handleConfigRequest(req, res, url, { cache, authToken: env.authToken, reloadSelf, spendCheck: (a) => spend.check(a) })) {
     return;
   }
 
@@ -298,6 +364,97 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // V2 autonomy API: one-shot turn injection + the agent loop engine. Bearer-
+  // authed like /sessions and /chats. This is the surface routines/cron/external
+  // triggers use to make the agent ACT between user messages.
+  if (url.pathname === "/agent/turn" || url.pathname === "/loops" || url.pathname.startsWith("/loops/")) {
+    if (env.authToken) {
+      const auth = req.headers.authorization;
+      if (auth !== `Bearer ${env.authToken}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+    }
+    const json = (code: number, obj: any) => {
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(obj));
+    };
+    const readBody = async (): Promise<any> => {
+      let body = "";
+      for await (const chunk of req) { body += chunk; if (body.length > 64 * 1024) throw new Error("too large"); }
+      return body ? JSON.parse(body) : {};
+    };
+
+    // POST /agent/turn { agentId?, message, sessionKey? } → fire ONE turn now.
+    // Spend-gated (402 when capped). Lands in a named chat so the user sees it.
+    if (req.method === "POST" && url.pathname === "/agent/turn") {
+      let b: any; try { b = await readBody(); } catch { json(400, { error: "bad_body" }); return; }
+      if (!b.message || typeof b.message !== "string") { json(400, { error: "message_required" }); return; }
+      const agent = b.agentId ? cache.findAgent(b.agentId) : cache.agentForChannel("web");
+      if (!agent) { json(404, { error: "no_agent" }); return; }
+      const cred = getCredential(agent.credential_id);
+      if (!cred) { json(400, { error: "no_credential" }); return; }
+      const drv = getDriver(agent.runtime);
+      if (!drv) { json(400, { error: "no_driver" }); return; }
+      const gate = spend.check(agent);
+      if (!gate.allowed) { json(402, { error: "spend_cap_exceeded", message: gate.reason }); return; }
+      const sessionKey = (typeof b.sessionKey === "string" && b.sessionKey) || "main";
+      chats.register(sessionKey);
+      const session = sessions.getOrCreate(sessionKey, "api", agent.id, agent.runtime);
+      transcripts.append(agent.id, sessionKey, { role: "user", text: b.message, source: "api" });
+      const result = await runAgentTurn({
+        agent, credential: cred, driver: drv,
+        systemPrompt: loadSystemPrompt(agent),
+        mcpConfigPath: getMcpConfigPath(env.mcpBridgePath),
+        message: b.message,
+        sessionId: session.claudeSessionId,
+        workingDir: agent.profile_dir,
+        onEvent: (e) => {
+          if (e.type === "tool_use") transcripts.append(agent.id, sessionKey, { role: "tool", kind: "use", name: e.name, target: e.target });
+          else if (e.type === "tool_result") transcripts.append(agent.id, sessionKey, { role: "tool", kind: "result", outcome: e.outcome });
+        },
+      });
+      if (result.usage) spend.record(agent, result.usage);
+      if (result.sessionId) sessions.updateClaudeSession(sessionKey, "api", result.sessionId, agent.runtime);
+      if (result.text.trim()) transcripts.append(agent.id, sessionKey, { role: "assistant", text: result.text });
+      json(result.error && !result.hadOutput ? 502 : 200, {
+        ok: !(result.error && !result.hadOutput),
+        text: result.text, error: result.error || undefined,
+        toolCount: result.toolCount, usage: result.usage, sessionKey,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/loops") { json(200, { loops: loops.list() }); return; }
+    if (req.method === "POST" && url.pathname === "/loops") {
+      let b: any; try { b = await readBody(); } catch { json(400, { error: "bad_body" }); return; }
+      try {
+        const loop = loops.create({
+          agentId: b.agentId || cache.agentForChannel("web")?.id,
+          goal: b.goal,
+          intervalSeconds: b.intervalSeconds,
+          maxIterations: b.maxIterations,
+          stopSentinel: b.stopSentinel,
+          name: b.name,
+        });
+        json(200, { loop });
+      } catch (e: any) { json(400, { error: "create_failed", message: e?.message || String(e) }); }
+      return;
+    }
+    const lm = url.pathname.match(/^\/loops\/([^/]+)(?:\/(stop|pause|resume))?$/);
+    if (lm) {
+      const id = decodeURIComponent(lm[1]);
+      const action = lm[2];
+      if (req.method === "GET" && !action) { const l = loops.get(id); json(l ? 200 : 404, l ? { loop: l } : { error: "not_found" }); return; }
+      if (req.method === "POST" && action === "stop") { const l = loops.stop(id); json(l ? 200 : 404, l ? { loop: l } : { error: "not_found" }); return; }
+      if (req.method === "POST" && action === "pause") { const l = loops.pause(id); json(l ? 200 : 404, l ? { loop: l } : { error: "not_found" }); return; }
+      if (req.method === "POST" && action === "resume") { const l = loops.resume(id); json(l ? 200 : 404, l ? { loop: l } : { error: "not_found" }); return; }
+    }
+    json(404, { error: "not_found" });
+    return;
+  }
+
   // Telegram webhook
   if (req.method === "POST" && url.pathname === "/telegram") {
     await handleTelegram(req, res);
@@ -357,6 +514,20 @@ wss.on("connection", (ws, req) => {
     const driver = getDriver(agent.runtime);
     if (!driver) {
       ws.send(JSON.stringify({ type: "error", text: `Unknown runtime ${agent.runtime}` }));
+      return;
+    }
+
+    // V1 spend kill-switch: refuse the turn BEFORE invoking the model if this
+    // agent has reached its daily token/USD cap. This is the floor that makes an
+    // unattended loop safe — without it, a looping agent on the customer's key
+    // has no cost ceiling. Refused here (before the transcript append) so a
+    // capped turn doesn't pollute history. Resets at 00:00 UTC.
+    const spendGate = spend.check(agent);
+    if (!spendGate.allowed) {
+      ws.send(JSON.stringify({
+        type: "error", code: "spend_cap_exceeded",
+        text: spendGate.reason || "Daily spend cap reached. Resets at 00:00 UTC.",
+      }));
       return;
     }
 
@@ -482,6 +653,11 @@ wss.on("connection", (ws, req) => {
           transcripts.append(agent.id, sessionKey, { role: "tool", kind: "result", outcome: event.outcome });
         } else if (event.type === "done") {
           flushAssistant();
+          // V1 spend meter: bill this turn's usage to the agent's daily bucket.
+          // Fires the warn/halt alert internally; the NEXT turn's spend.check
+          // enforces the cap. (claude-code reports real cost_usd; openclaw falls
+          // back to the price-table estimate.)
+          if (event.usage) spend.record(agent, event.usage);
         } else if (event.type === "error") {
           lastErrorText = event.text || lastErrorText;
           const reason = classifyCredentialError({ code: event.code, text: event.text });
@@ -627,6 +803,12 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
     await sendTelegram(env.telegramBotToken, chatId, `Agent runtime ${agent.runtime} not available.`); return;
   }
 
+  // V1 spend kill-switch: same daily cap enforced on the Telegram path.
+  const tgSpendGate = spend.check(agent);
+  if (!tgSpendGate.allowed) {
+    await sendTelegram(env.telegramBotToken, chatId, `🛑 ${tgSpendGate.reason || "Daily spend cap reached. Resets at 00:00 UTC."}`); return;
+  }
+
   const session = sessions.getOrCreate(chatId, "telegram", agent.id, agent.runtime);
   const systemPrompt = loadSystemPrompt(agent);
 
@@ -666,7 +848,10 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
       else if (event.type === "tool_use") { transcripts.append(agent.id, chatId, { role: "tool", kind: "use", name: event.name, target: event.target }); }
       else if (event.type === "tool_result") { transcripts.append(agent.id, chatId, { role: "tool", kind: "result", outcome: event.outcome }); }
       else if (event.type === "session" && event.sessionId) { sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime); }
-      else if (event.type === "done" && event.sessionId) { sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime); }
+      else if (event.type === "done") {
+        if (event.sessionId) sessions.updateClaudeSession(chatId, "telegram", event.sessionId, agent.runtime);
+        if (event.usage) spend.record(agent, event.usage); // V1 spend meter (parity with web path)
+      }
       else if (event.type === "error" && event.text && !fullText) { fullText = event.text; }
     }
   } catch (e: any) { fullText = `Error: ${e?.message || String(e)}`; }

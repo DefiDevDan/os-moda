@@ -68,7 +68,7 @@ Run these in sequence:
 2. **Critical services check**
    ```
    service_status({ service: "agentd" })
-   service_status({ service: "openclaw-gateway" })
+   service_status({ service: "osmoda-gateway" })
    service_status({ service: "sshd" })
    service_status({ service: "nginx" })  -- if configured
    ```
@@ -120,7 +120,7 @@ Run these in sequence:
 ```
 Good morning. Infrastructure report for Feb 20:
 
-Services: agentd, openclaw-gateway, sshd, nginx — all running
+Services: agentd, osmoda-gateway, sshd, nginx — all running
 Resources: CPU avg 11% overnight | RAM 4.1/7.6 GB | Disk 38%
 
 Overnight: Quiet night. No incidents.

@@ -14,7 +14,7 @@ done — see "still maturing" below.
 | Area | Status |
 |---|---|
 | **Main runtime = Claude Code** | Canonical default across install.sh / osmoda.nix / README / CLAUDE.md (a CI drift-gate enforces the agreement). OpenClaw is a fully-supported peer; managed-agent is a prototype. |
-| **Tier-0 PreToolUse approval hook** | **Implemented + unit-tested, live end-to-end verification pending.** Routes the agent's native Bash/Write/Edit through agentd's ApprovalGate + ledger. Ships in install.sh + the NixOS module. Until verified on a running box, treat as "shipped, not yet field-proven" (do not market as "enforced"). |
+| **Tier-0 PreToolUse approval hook** | **Implemented; hook↔agentd wire contract integration-tested; on-box verification pending.** Routes the agent's native Bash/Write/Edit through agentd's ApprovalGate + ledger. Ships in install.sh + the NixOS module. The wire contract is verified end-to-end (the hook runs as a subprocess against a stub agentd over a Unix socket: allow / deny-with-reason / secret-path self-protect / catastrophic-backstop when agentd is down / fail-open). Until it's verified firing in front of a real claude-code Bash call on a running box, treat as "shipped, not yet field-proven" (do not market as "enforced"). |
 | **CI** | Full `cargo test --workspace` (213) + gateway `npm test` (34) + a no-drift gate. |
 | **Data durability (hosted control plane)** | Atomic encrypted-store writes + `.bak` fallback (fixed a silent total-data-loss class). |
 | **Still maturing** | Live-verify the tool gate; fleet-wide trust (per-box SSH keys, egress confinement, spend kill-switch); the company-knowledge/connector layer; multi-org control plane (SSO/RBAC/Postgres). These are the path from "stable core" to "enterprise-ready." |

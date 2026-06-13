@@ -2,13 +2,13 @@
 
 # osModa
 
-### The first operating system built for AI agents.
+### An operating system built for AI agents.
 
-**Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
+**You operate the server by talking to it.** The agent has typed, audited access to the whole system — health, config, deploys, crash recovery — running on NixOS, where every change is a transaction you can undo with one command.
 
-10 Rust daemons. 92 structured tools. **Modular agent runtime** — swap between Claude Code (default), OpenClaw, and a cloud managed-agent driver without SSH or rebuilds. **Persistent named chats** — multiple distinct conversations per server, each with its own session, transcript, and auto-compaction, plus cross-chat and cross-channel awareness. **Pre-indexed code knowledge graph** (CodeGraph) so the agent navigates codebases — including the OS's own source — without grep-spraying. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+10 Rust daemons and 92 structured tools behind a modular runtime you can swap between Claude Code (default), OpenClaw, and a cloud managed-agent driver without SSH or rebuilds. Persistent named chats, a pre-indexed code knowledge graph, an append-only hash-chained audit ledger, atomic rollback on every change, an encrypted mesh between servers. It's a broad system, and the breadth is uneven on purpose — the runtime, the agentd contracts, and the ledger are solid; the mesh, the crypto wallet, voice, and the skill engine are earlier and less proven. [STATUS.md](docs/STATUS.md) grades every component honestly.
 
-> **v1.3.0 — Stable.** The core (10 daemons, the modular gateway, the agentd contracts + audit ledger, claude-code as the main runtime) is stable and deployed on real servers. Per-component maturity is tracked honestly in [STATUS.md](docs/STATUS.md); some advanced security hardening (live-verifying the tier-0 tool gate, fleet-wide trust) is still maturing — see the [Safety Model](#safety-model).
+> **What to expect.** osModa is an ambitious solo project (~250 commits; 247 tests + a self-run pentest — *not* an external audit), not battle-tested infrastructure. The core is stable, but the safety model has a known gap it's actively closing: the default runtime's native shell/file tools aren't yet routed through the approval gate and audit ledger (the hook that fixes this is built and wire-tested, but not yet verified end-to-end on a live box — see the [Safety Model](#safety-model)). **Run it on a fresh, disposable server — not a production machine you care about.** Per-component maturity is tracked honestly in [STATUS.md](docs/STATUS.md).
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-v1.3.0-4f46e5.svg)]()
@@ -31,16 +31,16 @@
 
 ## Who Is This For
 
-- **Solo developers who run their own servers** — your server monitors itself, fixes problems at 3am, and tells you about it in the morning
-- **AI agent builders who need infrastructure** — deploy agents with API key management, health monitoring, crash recovery, and an encrypted mesh between machines
-- **Small teams tired of on-call rotations** — the AI handles routine ops, escalates what it can't fix, and keeps a tamper-proof audit trail of everything it does
-- **Anyone building an AI workforce** — osModa is the computer your agents live in. Not a VPS you SSH into. A machine that manages itself.
+- **Solo developers who run their own servers** — talk to your server instead of SSH-ing in. It watches itself, attempts routine fixes, and tells you what it did — with every OS-level change reversible on NixOS, so a wrong move is an undo, not an incident.
+- **AI agent builders who need infrastructure** — a place for agents to actually live: credential management, health monitoring, crash recovery, and an encrypted mesh between machines.
+- **Small teams tired of on-call rotations** — let the agent handle routine ops and escalate what it can't, with a hash-chained audit trail of its structured actions (read the [Safety Model](#safety-model) for exactly what that covers — and what it doesn't yet).
+- **Anyone experimenting with an AI workforce** — osModa is a computer your agents operate, not a VPS you SSH into. It's research-grade today: great on a disposable box, not something to point at production yet.
 
 ## Why This Exists
 
-Every AI agent framework assumes your infrastructure is someone else's problem. They give you an agent that can think — but nowhere for it to live. So you SSH into a VPS, install things manually, pray nothing breaks at 3am, and when it does, you're the one waking up.
+Most AI-agent frameworks give you an agent that can think but nowhere for it to live — so you still SSH into a VPS, install things by hand, and own every page yourself.
 
-osModa is the other half: **the machine itself is AI-native.** 92 structured tools across 10 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
+osModa is the other half: **the machine itself is AI-native.** 92 structured tools across 10 Rust daemons give the agent typed, auditable access to the OS — `system_health` returns JSON, not text you have to regex. Structured mutations are SHA-256 hash-chained to an append-only ledger. And because it's NixOS, a bad deploy rolls back the whole system state atomically. When a service falls over, a watcher can catch it and the agent can attempt a fix through SafeSwitch, with automatic rollback if the health checks fail. The honest framing: this is supervised autonomy with an undo button — not a promise the agent is always right. A confident-but-wrong fix is exactly why every OS change is reversible and every run should be budget-capped and reviewed.
 
 **Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. This makes AI root access meaningfully safer than on any traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
 
@@ -250,7 +250,7 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 
 **Be precise about what is and isn't enforced.** The blocklist, approval gate, and audit ledger above sit in front of the structured MCP tools (`shell_exec`, `file_write`, `safe_switch_*`, …). But the default `claude-code` runtime also gives the agent the **native `Bash`, `Write`, and `Edit` tools**, which execute directly and **currently bypass the blocklist, the approval gate, and the ledger.** So today, governance of the tier-0 agent rests on NixOS atomic rollback, spending limits, and audit review — *not* on per-action approval of everything the agent does.
 
-A **PreToolUse enforcement hook** that routes the native tools through agentd's approval + hash-chained ledger is now **implemented** (ships via `install.sh` + the NixOS module): native `Bash` is checked against agentd's ApprovalGate and every gated decision is appended to the ledger; writes to guardrail/secret paths require approval. It's unit-tested (40 gateway + 50 agentd tests green) but **live end-to-end verification on a running box is still pending** — until that's confirmed, keep running osModa on disposable/dedicated boxes, set provider spend limits, review the ledger, and treat "every mutation is approval-gated" as the *goal*, not yet a proven guarantee. See [SECURITY.md](docs/SECURITY.md) for what it does and how to verify.
+A **PreToolUse enforcement hook** that routes the native tools through agentd's approval + hash-chained ledger is now **implemented** (ships via `install.sh` + the NixOS module): native `Bash` is checked against agentd's ApprovalGate and every gated decision is appended to the ledger; writes to guardrail/secret paths require approval. The hook↔agentd **wire contract is integration-tested end-to-end** — the hook runs as a real subprocess against a stub agentd over a Unix socket, covering allow, deny-with-reason, secret-path self-protect, the catastrophic-command backstop when agentd is unreachable, and fail-open on malformed input — alongside the gateway + agentd unit suites. **What's still unverified is that it fires in front of a real `claude-code` Bash call on a running box.** Until that's confirmed, keep osModa on disposable/dedicated boxes, set provider spend limits, review the ledger, and treat "every mutation is approval-gated" as the *goal*, not yet a proven guarantee. See [SECURITY.md](docs/SECURITY.md) for what it does and how to verify.
 
 ### What NixOS rollback covers — and what it doesn't
 
@@ -260,7 +260,7 @@ A **PreToolUse enforcement hook** that routes the native tools through agentd's 
 
 ### What's planned but not yet complete
 
-- **Tier-0 tool-gate enforcement (PreToolUse hook)** — *implemented; live verification pending.* Routes the default agent's native `Bash`/`Write`/`Edit` through agentd's approval + audit ledger so the blocklist and approval gate cover the path the agent actually uses (not just the structured `shell_exec`/`file_write` tools). Ships in `install.sh` + the NixOS module; see [SECURITY.md](docs/SECURITY.md).
+- **Tier-0 tool-gate enforcement (PreToolUse hook)** — *implemented; wire contract integration-tested; on-box verification pending.* Routes the default agent's native `Bash`/`Write`/`Edit` through agentd's approval + audit ledger so the blocklist and approval gate cover the path the agent actually uses (not just the structured `shell_exec`/`file_write` tools). Ships in `install.sh` + the NixOS module; see [SECURITY.md](docs/SECURITY.md).
 - **Tier 1/Tier 2 sandbox enforcement** — the trust tier model is designed and `sandbox_exec` exists, but bubblewrap isolation isn't fully wired for all third-party tools yet.
 - **Capability token auth** — `capability_mint` can create time-limited tokens, but socket authentication is still primarily file-permissions based.
 - **External security audit** — mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but hasn't had independent review.
@@ -552,7 +552,7 @@ skills/                     19 system skill definitions
 
 ## Status
 
-> **v1.3.0 — stable core.** osModa is deployed on real servers managing real workloads — a working operating system with 247 tests (213 Rust + 34 gateway), pen-tested security, and months of development. The architecture, the agentd contracts, the event/streaming contract, and **Claude Code as the main runtime** are stable; you can build on them. What's still maturing is advanced security hardening (live-verifying the tier-0 tool gate, fleet-wide trust) and the company-integration layer — tracked honestly per component in [STATUS.md](docs/STATUS.md). This is a real 1.x, not a finished 1.0-forever — features still ship fast.
+> **v1.3.0 — stable core, honest about the rest.** osModa is a working operating system with 247 tests (213 Rust + gateway) and a self-run pentest behind it — but it's an ambitious solo project with months of work, *not* externally-audited, battle-tested infrastructure. The architecture, the agentd contracts, the event/streaming contract, and **Claude Code as the main runtime** are stable and you can build on them. Still maturing: the tier-0 tool gate (built, wire-tested, on-box verification pending), fleet-wide trust, an external security review, and the company-integration layer — tracked per component in [STATUS.md](docs/STATUS.md). **Treat it as research-grade: run it on a fresh/disposable box, not production you care about.** It's a real, fast-moving 1.x.
 
 **The numbers:**
 - 10 Rust crates (10 daemons + 1 CLI)

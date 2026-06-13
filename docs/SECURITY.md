@@ -105,10 +105,14 @@ a PreToolUse hook (`packages/osmoda-gateway/hooks/pretooluse-approval.mjs`) matc
   (NixOS modules, app code) is deliberately **allowed** — that's the agent's job.
 - The hook **only ever blocks**; it never force-approves, so it can't weaken any other check.
 
-**Status (2026-06-11): implemented + unit-tested, live end-to-end verification pending.**
-40 gateway tests + 50 agentd tests are green, including the hook's decision logic and the
-ApprovalGate matcher. The full `claude → hook → agentd` round-trip has NOT yet been exercised
-on a running box — until it is, treat this as "shipped, not yet field-verified." To verify on a box:
+**Status (2026-06-13): implemented; hook↔agentd wire contract integration-tested; on-box verification pending.**
+The gateway + agentd unit suites are green (the hook's decision logic + the ApprovalGate matcher),
+and the hook↔agentd **wire contract is now integration-tested end-to-end** — the hook runs as a real
+subprocess against a stub agentd over a Unix socket, covering allow, deny-with-reason, secret-path
+self-protect, the catastrophic-command backstop when agentd is unreachable, and fail-open on malformed
+input. What remains: the full `claude → hook → agentd` round-trip has NOT yet been exercised against a
+real `claude-code` Bash call on a running box — until it is, treat this as "shipped, not yet
+field-verified." To verify on a box:
 
 ```bash
 # 1. confirm the agent is launched with the hook settings
